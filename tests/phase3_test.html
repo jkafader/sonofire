@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Phase 3: Control Components Test</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            color: #4ec9b0;
+        }
+        #log {
+            background: #252526;
+            border: 1px solid #3c3c3c;
+            padding: 10px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 2px 0;
+        }
+        .info {
+            background: #252526;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-left: 3px solid #007acc;
+        }
+    </style>
+</head>
+<body>
+    <h1>Phase 3: Control Components Test</h1>
+
+    <div class="info">
+        <p><strong>Testing:</strong> Conductor and Composer working together</p>
+        <p>The Conductor manages harmonic context and MIDI Clock.</p>
+        <p>The Composer generates chord progressions and publishes them via PubSub.</p>
+    </div>
+
+    <!-- Conductor Component -->
+    <sonofire-conductor
+        data-initial-key="C"
+        data-initial-scale="major"
+        data-tempo="120"
+        data-mode="manual">
+    </sonofire-conductor>
+
+    <!-- Composer Component -->
+    <sonofire-composer
+        data-progression-style="jazz"
+        data-bars-per-chord="4"
+        data-voicing-type="close">
+    </sonofire-composer>
+
+    <div id="log">
+        <strong>Event Log:</strong><br>
+    </div>
+
+    <script type="module">
+        import { PubSub } from '../lib/pubsub.js';
+        import '../components/controllers/conductor.js';
+        import '../components/controllers/composer.js';
+
+        const logEl = document.getElementById('log');
+
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        // Subscribe to all relevant events
+        PubSub.subscribe('context:key', (data) => {
+            log(`🎼 Key changed: ${data.key} ${data.scale}`, 'success');
+        });
+
+        PubSub.subscribe('context:mood', (data) => {
+            log(`🎭 Mood changed: ${data.mood}`, 'info');
+        });
+
+        PubSub.subscribe('context:spareness', (data) => {
+            log(`🎚️ Spareness changed: ${data.spareness.toFixed(2)}`, 'info');
+        });
+
+        PubSub.subscribe('music:chord', (data) => {
+            log(`🎹 Chord: ${data.chord} [${data.voicing.join(', ')}] (${data.progressionIndex + 1}/${data.progressionLength})`, 'success');
+        });
+
+        PubSub.subscribe('clock:start', (data) => {
+            log(`⏱️ Clock started at ${data.bpm} BPM`, 'success');
+        });
+
+        PubSub.subscribe('clock:stop', (data) => {
+            log(`⏱️ Clock stopped at tick ${data.finalTick}`, 'info');
+        });
+
+        PubSub.subscribe('clock:tempo', (data) => {
+            log(`⏱️ Tempo changed: ${data.previousBPM} → ${data.bpm} BPM`, 'info');
+        });
+
+        PubSub.subscribe('clock:tick', (data) => {
+            // Log every beat (not every tick to avoid spam)
+            if (data.tick % 24 === 0) {
+                const beat = data.tick / 24;
+                const bar = Math.floor(beat / 4) + 1;
+                const beatInBar = (beat % 4) + 1;
+                log(`⏱️ Tick: ${data.tick} (Bar ${bar}, Beat ${beatInBar})`, 'debug');
+            }
+        });
+
+        log('Page loaded - ready to test control components', 'info');
+    </script>
+</body>
+</html>

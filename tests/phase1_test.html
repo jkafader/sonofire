@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Phase 1: Core Infrastructure Test</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            color: #4ec9b0;
+        }
+        h2 {
+            color: #569cd6;
+            margin-top: 30px;
+        }
+        .test-section {
+            background: #252526;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 3px solid #007acc;
+        }
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        button:hover {
+            background: #1177bb;
+        }
+        .success {
+            color: #4ec9b0;
+        }
+        .error {
+            color: #f48771;
+        }
+        #output {
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            padding: 10px;
+            margin-top: 10px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 2px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Sonofire Phase 1: Core Infrastructure Test</h1>
+    <p>Test the foundational services and verify they work correctly.</p>
+
+    <div class="test-section">
+        <h2>1. PubSub & Defaults</h2>
+        <button onclick="testPubSubDefaults()">Test PubSub Defaults</button>
+        <button onclick="testPubSubMessaging()">Test PubSub Messaging</button>
+    </div>
+
+    <div class="test-section">
+        <h2>2. MIDI Clock</h2>
+        <button onclick="testMIDIClock()">Start MIDI Clock</button>
+        <button onclick="stopMIDIClock()">Stop MIDI Clock</button>
+        <button onclick="changeTempo()">Change Tempo to 140 BPM</button>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Audio Output</h2>
+        <button onclick="initializeAudio()">Initialize Audio</button>
+        <button onclick="testWebAudioNote()">Play Web Audio Note (C4)</button>
+        <button onclick="testMIDINote()">Send MIDI Note (C4)</button>
+        <button onclick="testRouterNote()">Play via Router (C4)</button>
+        <button onclick="panic()">Panic (Stop All)</button>
+    </div>
+
+    <div class="test-section">
+        <h2>4. Harmonic Context</h2>
+        <button onclick="testHarmonicContext()">Set Key to D Major</button>
+        <button onclick="testScaleCheck()">Test Scale Membership</button>
+    </div>
+
+    <div id="output"></div>
+
+    <script type="module">
+        import { PubSub } from '../lib/pubsub.js';
+        import { initDefaults, resetDefaults } from '../lib/init_defaults.js';
+        import { midiClock } from '../lib/midi_clock.js';
+        import { midiOutput } from '../lib/midi_output.js';
+        import { webAudioSynth } from '../lib/web_audio_synth.js';
+        import { audioRouter } from '../lib/audio_router.js';
+        import { harmonicContext } from '../lib/harmonic_context.js';
+
+        // Make available globally for button handlers
+        window.PubSub = PubSub;
+        window.initDefaults = initDefaults;
+        window.resetDefaults = resetDefaults;
+        window.midiClock = midiClock;
+        window.midiOutput = midiOutput;
+        window.webAudioSynth = webAudioSynth;
+        window.audioRouter = audioRouter;
+        window.harmonicContext = harmonicContext;
+
+        // Logging helper
+        function log(message, type = 'info') {
+            const output = document.getElementById('output');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            output.appendChild(entry);
+            output.scrollTop = output.scrollHeight;
+            console.log(message);
+        }
+
+        window.log = log;
+
+        // Initialize defaults on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            log('Page loaded - initializing defaults...', 'info');
+            initDefaults();
+            log('Defaults initialized', 'success');
+        });
+
+        // Subscribe to clock ticks for monitoring
+        PubSub.subscribe('clock:tick', (data) => {
+            if (data.tick % 24 === 0) { // Log every beat (24 ppqn)
+                log(`Clock tick: ${data.tick} (beat ${data.tick / 24})`, 'info');
+            }
+        });
+
+        // Subscribe to key changes
+        PubSub.subscribe('context:key', (data) => {
+            log(`Key changed to: ${data.key} ${data.scale}`, 'success');
+        });
+
+        // Test functions
+        window.testPubSubDefaults = () => {
+            log('Testing PubSub defaults...', 'info');
+
+            const key = PubSub.last('context:key');
+            const mood = PubSub.last('context:mood');
+            const spareness = PubSub.last('context:spareness');
+            const tempo = PubSub.last('clock:tempo');
+
+            log(`Key: ${JSON.stringify(key)}`, key ? 'success' : 'error');
+            log(`Mood: ${JSON.stringify(mood)}`, mood ? 'success' : 'error');
+            log(`Spareness: ${JSON.stringify(spareness)}`, spareness ? 'success' : 'error');
+            log(`Tempo: ${JSON.stringify(tempo)}`, tempo ? 'success' : 'error');
+        };
+
+        window.testPubSubMessaging = () => {
+            log('Testing PubSub messaging...', 'info');
+
+            PubSub.subscribe('test:message', (data) => {
+                log(`Received test message: ${data.content}`, 'success');
+            });
+
+            PubSub.publish('test:message', { content: 'Hello from PubSub!' });
+        };
+
+        window.testMIDIClock = () => {
+            log('Starting MIDI Clock at 120 BPM...', 'info');
+            midiClock.start(120);
+            log('MIDI Clock started', 'success');
+        };
+
+        window.stopMIDIClock = () => {
+            log('Stopping MIDI Clock...', 'info');
+            midiClock.stop();
+            log('MIDI Clock stopped', 'success');
+        };
+
+        window.changeTempo = () => {
+            log('Changing tempo to 140 BPM...', 'info');
+            midiClock.setBPM(140);
+            log('Tempo changed', 'success');
+        };
+
+        window.initializeAudio = async () => {
+            log('Initializing audio outputs...', 'info');
+            const result = await audioRouter.initialize();
+            log(`MIDI: ${result.midi ? 'OK' : 'FAILED'}`, result.midi ? 'success' : 'error');
+            log(`Web Audio: ${result.webAudio ? 'OK' : 'FAILED'}`, result.webAudio ? 'success' : 'error');
+        };
+
+        window.testWebAudioNote = () => {
+            log('Playing Web Audio note C4 (60)...', 'info');
+            webAudioSynth.playNote(0, 60, 100);
+            setTimeout(() => {
+                webAudioSynth.stopNote(0, 60);
+                log('Note stopped', 'success');
+            }, 500);
+        };
+
+        window.testMIDINote = async () => {
+            if (!midiOutput.initialized) {
+                await midiOutput.initialize();
+            }
+            log('Sending MIDI note C4 (60)...', 'info');
+            midiOutput.sendNoteOn(0, 60, 100);
+            setTimeout(() => {
+                midiOutput.sendNoteOff(0, 60);
+                log('MIDI note off sent', 'success');
+            }, 500);
+        };
+
+        window.testRouterNote = async () => {
+            if (!audioRouter.midiEnabled && !audioRouter.webAudioEnabled) {
+                await initializeAudio();
+            }
+            log('Playing note via audio router (C4, 500ms)...', 'info');
+            audioRouter.sendNote(0, 60, 100, 500);
+            log('Note scheduled', 'success');
+        };
+
+        window.panic = () => {
+            log('PANIC: Stopping all notes...', 'info');
+            audioRouter.panic();
+            log('All notes stopped', 'success');
+        };
+
+        window.testHarmonicContext = () => {
+            log('Setting key to D Major...', 'info');
+            harmonicContext.setKey('D', 'major');
+            log('Key set', 'success');
+        };
+
+        window.testScaleCheck = () => {
+            log('Testing scale membership...', 'info');
+            const state = harmonicContext.getCurrentState();
+            log(`Current scale: ${state.key} ${state.scale}`, 'info');
+            log(`Scale notes: ${state.notes.join(', ')}`, 'info');
+
+            const testNote = 62; // D4
+            const inScale = harmonicContext.isInScale(testNote);
+            log(`Note ${testNote} (D) in scale: ${inScale}`, inScale ? 'success' : 'error');
+
+            const testNote2 = 61; // C#4
+            const inScale2 = harmonicContext.isInScale(testNote2);
+            log(`Note ${testNote2} (C#) in scale: ${inScale2}`, inScale2 ? 'success' : 'error');
+        };
+    </script>
+</body>
+</html>

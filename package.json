@@ -1,0 +1,22 @@
+{
+  "name": "sonofire",
+  "version": "0.1.0",
+  "description": "Data Sonification System - Transform data visualizations into music",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "dev": "make dev"
+  },
+  "devDependencies": {
+    "@vitest/browser": "^2.1.8",
+    "@vitest/ui": "^2.1.8",
+    "playwright": "^1.49.1",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "d3": "^7.9.0"
+  }
+}
