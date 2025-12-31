@@ -1,15 +1,181 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>MIDI Test</title>
+    <title>Sonofire - Data Sonification</title>
     <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 10px;
+        }
+        .info {
+            background: #252526;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-left: 3px solid #007acc;
+        }
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        button:hover {
+            background: #1177bb;
+        }
+        #status {
+            margin-top: 10px;
+            padding: 10px;
+            background: #252526;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
 </head>
 <body>
-    <script type='module'>
-    import "./components/pitch_generator.js";
+    <h1>Sonofire: Data Sonification System</h1>
+
+    <div class="info">
+        <p><strong>Phase 3:</strong> Added Conductor & Composer control components</p>
+        <p>The Conductor manages harmonic context and MIDI Clock. The Composer generates chord progressions.</p>
+        <div>
+            <button onclick="initAudio()">Initialize Audio Outputs</button>
+            <label style="margin-left: 15px;">
+                <input type="checkbox" id="midi-toggle" checked onchange="toggleMIDI(this.checked)">
+                MIDI Output
+            </label>
+            <label style="margin-left: 10px;">
+                <input type="checkbox" id="webaudio-toggle" checked onchange="toggleWebAudio(this.checked)">
+                WebAudio Output
+            </label>
+        </div>
+        <div id="status">Audio: Not initialized</div>
+    </div>
+
+    <!-- Control Components (Using new Pool/Tonic notation) -->
+    <sonofire-conductor
+        data-pool="3♯"
+        data-tonic="A"
+        data-tempo="120"
+        data-mode="manual">
+    </sonofire-conductor>
+
+    <sonofire-composer
+        data-progression-style="jazz"
+        data-bars-per-chord="4"
+        data-progression-length="4"
+        data-use-probabilistic="true">
+    </sonofire-composer>
+
+    <!-- Visualizer -->
+    <sonofire-xy-plot id="main-xy-plot" width="720" height="300"></sonofire-xy-plot>
+
+    <!-- Playhead Manager -->
+    <sonofire-playhead-manager data-visualizer-id="main-xy-plot"></sonofire-playhead-manager>
+
+    <!-- Instrumentalists -->
+    <h1>Instrumentalists</h1>
+    <sonofire-soloist
+        data-channel="0"
+        data-style="melodic"
+        data-note-range="mid"
+        data-max-interval="7"
+        data-enabled="true">
+    </sonofire-soloist>
+
+    <sonofire-drummer
+        data-channel="9"
+        data-drum-style="rock"
+        data-enabled="true">
+    </sonofire-drummer>
+
+    <sonofire-bassist
+        data-channel="1"
+        data-bass-style="walking"
+        data-note-range="mid-low"
+        data-density="0.75"
+        data-enabled="true">
+    </sonofire-bassist>
+
+    <script type="module">
+        import { audioRouter } from './lib/audio_router.js';
+        import { PubSub } from './lib/pubsub.js';
+        import { WhipManager } from './lib/whip_manager.js';
+        import { WhipDragHandler } from './lib/whip_drag_handler.js';
+        import './components/controllers/conductor.js';
+        import './components/controllers/composer.js';
+        import './components/visualizers/xy_plot.js';
+        import './components/ui/playhead_manager.js';
+        import './components/instrumentalists/soloist.js';
+        import './components/instrumentalists/drummer.js';
+        import './components/instrumentalists/bassist.js';
+
+        // Initialize whip binding system
+        WhipManager.initialize();
+        WhipDragHandler.initialize();
+
+        // Make available globally for buttons
+        window.audioRouter = audioRouter;
+        window.PubSub = PubSub;
+
+        // Status updates
+        const statusEl = document.getElementById('status');
+
+        function updateStatus() {
+            const audioConfig = audioRouter.getConfig();
+            const audioStatus = `MIDI: ${audioConfig.midi ? 'ON' : 'OFF'}, WebAudio: ${audioConfig.webAudio ? 'ON' : 'OFF'}`;
+            statusEl.textContent = `Audio: ${audioStatus}`;
+        }
+
+        window.initAudio = async () => {
+            await audioRouter.initialize();
+            updateStatus();
+        };
+
+        window.toggleMIDI = (enabled) => {
+            audioRouter.setMIDIEnabled(enabled);
+            updateStatus();
+        };
+
+        window.toggleWebAudio = (enabled) => {
+            audioRouter.setWebAudioEnabled(enabled);
+            updateStatus();
+        };
+
+        // Subscribe to events for debugging
+        PubSub.subscribe('data:point', (data) => {
+            console.log('Data point:', data.note);
+        });
+
+        PubSub.subscribe('music:chord', (data) => {
+            console.log('Chord:', data.chord, data.voicing);
+        });
+
+        PubSub.subscribe('context:key', (data) => {
+            console.log('Key:', data.key, data.scale);
+        });
+
+        // TEST: Direct clock:tick subscription to verify events are publishing
+        /*let testTickCount = 0;
+        PubSub.subscribe('clock:tick', (data) => {
+            testTickCount++;
+            if (testTickCount === 1 || testTickCount % 24 === 0) {
+                console.log('TEST: clock:tick received in index.html:', data.tick);
+            }
+        });*/
+
+        // Initial status
+        updateStatus();
     </script>
-
-    <sonofire-pitch-generator width="700" height="300"></sonofire-pitch-generator>
-
 </body>
 </html>
