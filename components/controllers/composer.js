@@ -65,12 +65,7 @@ export class SonofireComposer extends SonofireBase {
     setupSubscriptions() {
         super.setupSubscriptions();
 
-        // Subscribe to key changes from Conductor
-        this.subscribe('context:key', (data) => {
-            this.handleKeyChange(data);
-        });
-
-        // Subscribe to pool/tonic changes (new system)
+        // Subscribe to pool/tonic changes
         this.subscribe('context:pool', (data) => {
             this.handlePoolChange(data);
         });
@@ -124,23 +119,12 @@ export class SonofireComposer extends SonofireBase {
     connectedCallback() {
         super.connectedCallback();
 
-        // Discover current context from PubSub (prefer pool/tonic)
+        // Discover current context from PubSub
         const poolContext = this.getLastValue('context:pool');
         if (poolContext) {
             this.poolKey = poolContext.poolKey;
             this.tonicNote = poolContext.tonicNote;
             this.tonicName = poolContext.tonicName;
-        } else {
-            // Fall back to legacy key context
-            const keyContext = this.getLastValue('context:key');
-            if (keyContext) {
-                this.currentKey = keyContext.key;
-                this.currentScale = keyContext.scale;
-                // Extract pool info if available
-                if (keyContext.poolKey) {
-                    this.poolKey = keyContext.poolKey;
-                }
-            }
         }
 
         // Register whippable parameters (after render)
@@ -255,14 +239,43 @@ export class SonofireComposer extends SonofireBase {
     generateProgressionProbabilistic(poolKey, startTonicNote, style, length) {
         const progression = [];
 
-        // Start with degree 1 (tonic)
-        // Pass startTonicNote as both the note to find AND the reference tonic (should always return 1)
-        let currentDegree = harmonicContext.getScaleDegreeInPool(startTonicNote, poolKey, startTonicNote) || 1;
+        // Determine which mode/degree the starting tonic is at in the pool
+        const pool = harmonicContext.getNotePool(poolKey);
+        const poolPitchClasses = [...new Set(pool.map(n => n % 12))];
+
+        // Map pool to major tonic to find the mode
+        const poolToMajorTonic = {
+            '0': 0, '1♯': 7, '2♯': 2, '3♯': 9, '4♯': 4, '5♯': 11, '6♯': 6,
+            '1♭': 5, '2♭': 10, '3♭': 3, '4♭': 8, '5♭': 1
+        };
+        const majorTonicPC = poolToMajorTonic[poolKey] || 0;
+
+        // Order pitch classes starting from major tonic
+        const orderedPitchClasses = [];
+        for (let i = 0; i < 7; i++) {
+            const pc = (majorTonicPC + [0, 2, 4, 5, 7, 9, 11][i]) % 12;
+            if (poolPitchClasses.includes(pc)) {
+                orderedPitchClasses.push(pc);
+            }
+        }
+
+        // Find which mode we're in (0=Ionian, 5=Aeolian, etc.)
+        const startTonicPC = startTonicNote % 12;
+        const modeIndex = orderedPitchClasses.indexOf(startTonicPC);
+
+        // Map mode index to mode name for harmonization
+        const modeNames = ['ionian', 'dorian', 'phrygian', 'lydian', 'mixolydian', 'aeolian', 'locrian'];
+        const modeName = modeNames[modeIndex] || 'ionian';
+
+        console.log(`Composer: Mode for ${harmonicContext.midiToNoteName(startTonicNote)} in pool ${poolKey}: ${modeName} (degree ${modeIndex + 1})`);
+
+        // Start with degree 1 (relative to our chosen tonic)
+        let currentDegree = 1;
         let currentTonicNote = startTonicNote;
 
         for (let i = 0; i < length; i++) {
-            // Get chord quality for this degree
-            const quality = getChordQualityForDegreeInPool(currentDegree, 'major');
+            // Get chord quality for this degree using the appropriate mode
+            const quality = getChordQualityForDegreeInPool(currentDegree, modeName);
 
             // Create chord object
             const chord = {
@@ -270,7 +283,8 @@ export class SonofireComposer extends SonofireBase {
                 root: currentTonicNote,
                 quality: quality,
                 degree: currentDegree,
-                poolKey: poolKey
+                poolKey: poolKey,
+                mode: modeName
             };
 
             progression.push(chord);
@@ -449,9 +463,88 @@ export class SonofireComposer extends SonofireBase {
     }
 
     /**
+     * Get friendly key name from pool/tonic notation
+     * E.g., "3♯/A" → "A Ionian (major)", "3♯/C♯" → "C♯ Phrygian"
+     * @returns {string} Friendly key name with mode
+     */
+    getFriendlyKeyName() {
+        if (!this.poolKey || !this.tonicName) {
+            return 'C Ionian (major)';
+        }
+
+        // Get the pool notes
+        const pool = harmonicContext.getNotePool(this.poolKey);
+        if (!pool || pool.length === 0) {
+            return `${this.tonicName} Ionian (major)`;
+        }
+
+        // Get unique pitch classes from the pool
+        const poolPitchClasses = [...new Set(pool.map(n => n % 12))];
+
+        // Map pool key to its major tonic (Ionian degree)
+        const poolToMajorTonic = {
+            '0': 0,      // C
+            '1♯': 7,     // G
+            '2♯': 2,     // D
+            '3♯': 9,     // A
+            '4♯': 4,     // E
+            '5♯': 11,    // B
+            '6♯': 6,     // F♯
+            '1♭': 5,     // F
+            '2♭': 10,    // B♭
+            '3♭': 3,     // E♭
+            '4♭': 8,     // A♭
+            '5♭': 1      // D♭
+        };
+
+        const majorTonicPC = poolToMajorTonic[this.poolKey];
+        if (majorTonicPC === undefined) {
+            return `${this.tonicName} (unknown pool)`;
+        }
+
+        // Order pitch classes starting from the major tonic
+        const orderedPitchClasses = [];
+        for (let i = 0; i < 7; i++) {
+            const pc = (majorTonicPC + [0, 2, 4, 5, 7, 9, 11][i]) % 12;
+            if (poolPitchClasses.includes(pc)) {
+                orderedPitchClasses.push(pc);
+            }
+        }
+
+        // Convert tonic name to pitch class
+        const tonicNote = harmonicContext.noteNameToMIDI(this.tonicName, 4);
+        const tonicPitchClass = tonicNote % 12;
+
+        // Find which degree this tonic is in the ordered pool
+        const degree = orderedPitchClasses.indexOf(tonicPitchClass);
+
+        if (degree === -1) {
+            // Tonic not in pool - shouldn't happen, but handle gracefully
+            return `${this.tonicName} (not in pool)`;
+        }
+
+        // Map degree (0-6) to mode name
+        const modeNames = [
+            'Ionian (major)',    // 1st degree
+            'Dorian',            // 2nd degree
+            'Phrygian',          // 3rd degree
+            'Lydian',            // 4th degree
+            'Mixolydian',        // 5th degree
+            'Aeolian (minor)',   // 6th degree
+            'Locrian'            // 7th degree
+        ];
+
+        const modeName = modeNames[degree] || 'Unknown';
+
+        return `${this.tonicName} ${modeName}`;
+    }
+
+    /**
      * Render the composer UI
      */
     render() {
+        const friendlyKeyName = this.getFriendlyKeyName();
+
         this.innerHTML = `
             <div style="background: #2d2d2d; padding: 15px; margin: 10px 0; border-left: 3px solid #569cd6;">
                 <h3 style="margin: 0 0 10px 0; color: #569cd6;">🎹 Composer</h3>
@@ -462,7 +555,8 @@ export class SonofireComposer extends SonofireBase {
                         <span style="display: inline-block; width: 12px; height: 12px; background: #00cc88; border-radius: 2px; vertical-align: middle;"></span> Current Chord
                         <span style="margin-left: 10px; display: inline-block; width: 12px; height: 12px; background: #5588cc; border-radius: 2px; vertical-align: middle;"></span> Next Chord
                         <span style="margin-left: 10px; display: inline-block; width: 12px; height: 12px; background: #ffcc00; border-radius: 50%; vertical-align: middle;"></span> Root
-                        <span style="margin-left: 15px;">Pool: ${this.poolKey || '0'}</span>
+                        <span style="margin-left: 15px; color: #569cd6; font-weight: bold;">${friendlyKeyName}</span>
+                        <span style="margin-left: 5px; color: #666; font-size: 0.85em;">(${this.poolKey || '0'}/${this.tonicName || 'C'})</span>
                     </div>
                     <div id="keyboard-grid">
                         ${this.renderKeyboardGrid()}

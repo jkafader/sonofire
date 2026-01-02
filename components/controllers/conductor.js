@@ -121,8 +121,13 @@ export class SonofireConductor extends SonofireBase {
         if (this.poolKey && this.tonicName) {
             this.setPoolAndTonic(this.poolKey, this.tonicName);
         } else {
-            // Fall back to legacy key/scale notation
-            this.setKey(this.initialKey, this.initialScale);
+            // Convert legacy key/scale notation to pool/tonic
+            const { poolKey, tonicName } = harmonicContext.keyScaleToPoolTonic(
+                this.initialKey,
+                this.initialScale
+            );
+            console.log(`Conductor: Converting legacy "${this.initialKey} ${this.initialScale}" → pool/tonic "${poolKey}/${tonicName}"`);
+            this.setPoolAndTonic(poolKey, tonicName);
         }
 
         // Publish initial mood and spareness
@@ -167,17 +172,80 @@ export class SonofireConductor extends SonofireBase {
     }
 
     /**
-     * Set the current key and scale (legacy notation)
+     * Get friendly key name from pool/tonic notation
+     * E.g., "3♯/A" → "A Ionian (major)", "3♯/C♯" → "C♯ Phrygian"
+     * @returns {string} Friendly key name with mode
      */
-    setKey(key, scale) {
-        this.initialKey = key;
-        this.initialScale = scale;
+    getFriendlyKeyName() {
+        if (!this.poolKey || !this.tonicName) {
+            return 'C Ionian (major)';
+        }
 
-        // Update harmonic context service
-        harmonicContext.setKey(key, scale);
+        // Get the pool notes
+        const pool = harmonicContext.getNotePool(this.poolKey);
+        if (!pool || pool.length === 0) {
+            return `${this.tonicName} Ionian (major)`;
+        }
 
-        // Publish to PubSub (harmonicContext already does this, but we can add logging)
-        console.log(`Conductor: Key set to ${key} ${scale}`);
+        // Get unique pitch classes from the pool
+        const poolPitchClasses = [...new Set(pool.map(n => n % 12))];
+
+        // Map pool key to its major tonic (Ionian degree)
+        const poolToMajorTonic = {
+            '0': 0,      // C
+            '1♯': 7,     // G
+            '2♯': 2,     // D
+            '3♯': 9,     // A
+            '4♯': 4,     // E
+            '5♯': 11,    // B
+            '6♯': 6,     // F♯
+            '1♭': 5,     // F
+            '2♭': 10,    // B♭
+            '3♭': 3,     // E♭
+            '4♭': 8,     // A♭
+            '5♭': 1      // D♭
+        };
+
+        const majorTonicPC = poolToMajorTonic[this.poolKey];
+        if (majorTonicPC === undefined) {
+            return `${this.tonicName} (unknown pool)`;
+        }
+
+        // Order pitch classes starting from the major tonic
+        const orderedPitchClasses = [];
+        for (let i = 0; i < 7; i++) {
+            const pc = (majorTonicPC + [0, 2, 4, 5, 7, 9, 11][i]) % 12;
+            if (poolPitchClasses.includes(pc)) {
+                orderedPitchClasses.push(pc);
+            }
+        }
+
+        // Convert tonic name to pitch class
+        const tonicNote = harmonicContext.noteNameToMIDI(this.tonicName, 4);
+        const tonicPitchClass = tonicNote % 12;
+
+        // Find which degree this tonic is in the ordered pool
+        const degree = orderedPitchClasses.indexOf(tonicPitchClass);
+
+        if (degree === -1) {
+            // Tonic not in pool - shouldn't happen, but handle gracefully
+            return `${this.tonicName} (not in pool)`;
+        }
+
+        // Map degree (0-6) to mode name
+        const modeNames = [
+            'Ionian (major)',    // 1st degree
+            'Dorian',            // 2nd degree
+            'Phrygian',          // 3rd degree
+            'Lydian',            // 4th degree
+            'Mixolydian',        // 5th degree
+            'Aeolian (minor)',   // 6th degree
+            'Locrian'            // 7th degree
+        ];
+
+        const modeName = modeNames[degree] || 'Unknown';
+
+        return `${this.tonicName} ${modeName}`;
     }
 
     /**
@@ -186,16 +254,21 @@ export class SonofireConductor extends SonofireBase {
      * @param {string} tonicName - Tonic note name (e.g., "A", "C♯")
      */
     setPoolAndTonic(poolKey, tonicName) {
+        console.log(`Conductor: setPoolAndTonic() called with poolKey="${poolKey}", tonicName="${tonicName}"`);
+
         this.poolKey = poolKey;
         this.tonicName = tonicName;
 
         // Convert tonic name to MIDI note
         const tonicNote = harmonicContext.noteNameToMIDI(tonicName, 4);
 
+        console.log(`Conductor: Converted tonicName "${tonicName}" to MIDI note ${tonicNote}`);
+        console.log(`Conductor: Calling harmonicContext.setPoolAndTonic()`);
+
         // Update harmonic context service
         harmonicContext.setPoolAndTonic(poolKey, tonicNote, tonicName);
 
-        console.log(`Conductor: Pool/Tonic set to ${poolKey}/${tonicName}`);
+        console.log(`Conductor: Pool/Tonic set to ${poolKey}/${tonicName} (MIDI ${tonicNote})`);
     }
 
     /**
@@ -289,14 +362,15 @@ export class SonofireConductor extends SonofireBase {
         // Determine current display values
         const displayPoolKey = this.poolKey || '0';
         const displayTonicName = this.tonicName || this.initialKey || 'C';
+        const friendlyKeyName = this.getFriendlyKeyName();
 
         this.innerHTML = `
             <div style="background: #2d2d2d; padding: 15px; margin: 10px 0; border-left: 3px solid #4ec9b0;">
                 <h3 style="margin: 0 0 10px 0; color: #4ec9b0;">🎼 Conductor</h3>
 
-                <!-- Pool/Tonic Notation (New System) -->
+                <!-- Pool/Tonic Notation (Primary System) -->
                 <div style="margin-bottom: 10px; padding: 10px; background: #1e1e1e; border-radius: 4px;">
-                    <strong style="color: #569cd6;">Pool/Tonic:</strong>
+                    <strong style="color: #569cd6;">Key:</strong>
                     <select id="pool-select" style="margin-left: 10px;">
                         ${this.renderPoolOptions()}
                     </select>
@@ -304,13 +378,16 @@ export class SonofireConductor extends SonofireBase {
                     <select id="tonic-select">
                         ${this.renderTonicOptions()}
                     </select>
-                    <span style="margin-left: 10px; color: #888; font-size: 0.9em;">
-                        (Pool: ${displayPoolKey}, Tonic: ${displayTonicName})
+                    <span style="margin-left: 10px; color: #4ec9b0; font-weight: bold;">
+                        ${friendlyKeyName}
+                    </span>
+                    <span style="margin-left: 5px; color: #666; font-size: 0.85em;">
+                        (${displayPoolKey}/${displayTonicName})
                     </span>
                 </div>
 
-                <!-- Legacy Key/Scale (for reference) -->
-                <details style="margin-bottom: 10px;">
+                <!-- Legacy Key/Scale (hidden by default, for backward compatibility) -->
+                <details style="margin-bottom: 10px; display: none;">
                     <summary style="cursor: pointer; color: #888; font-size: 0.9em;">Legacy Key/Scale Notation</summary>
                     <div style="margin-top: 5px; padding: 5px;">
                         <strong>Key:</strong>
@@ -406,18 +483,30 @@ export class SonofireConductor extends SonofireBase {
             this.render(); // Update UI to show new pool/tonic
         };
 
-        // Legacy key/scale selectors
+        // Legacy key/scale selectors - convert to pool/tonic
         const keySelect = this.$('#key-select');
         if (keySelect) {
             keySelect.onchange = (e) => {
-                this.setKey(e.target.value, this.initialScale);
+                const { poolKey, tonicName } = harmonicContext.keyScaleToPoolTonic(
+                    e.target.value,
+                    this.initialScale
+                );
+                console.log(`Conductor: Legacy key selector changed to ${e.target.value} ${this.initialScale} → ${poolKey}/${tonicName}`);
+                this.setPoolAndTonic(poolKey, tonicName);
+                this.render();
             };
         }
 
         const scaleSelect = this.$('#scale-select');
         if (scaleSelect) {
             scaleSelect.onchange = (e) => {
-                this.setKey(this.initialKey, e.target.value);
+                const { poolKey, tonicName } = harmonicContext.keyScaleToPoolTonic(
+                    this.initialKey,
+                    e.target.value
+                );
+                console.log(`Conductor: Legacy scale selector changed to ${this.initialKey} ${e.target.value} → ${poolKey}/${tonicName}`);
+                this.setPoolAndTonic(poolKey, tonicName);
+                this.render();
             };
         }
 

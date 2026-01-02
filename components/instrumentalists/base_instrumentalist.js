@@ -56,6 +56,8 @@ export class BaseInstrumentalist extends SonofireBase {
     setupSubscriptions() {
         super.setupSubscriptions();
 
+        console.log(`${this.constructor.name}: Setting up subscriptions...`);
+
         // Subscribe to musical context changes
         this.subscribe('music:chord', (data) => {
             this.handleChordChange(data);
@@ -69,16 +71,22 @@ export class BaseInstrumentalist extends SonofireBase {
             this.spareness = data.spareness;
         });
 
-        this.subscribe('context:key', (data) => {
+        /*this.subscribe('context:key', (data) => {
+            console.log(`${this.constructor.name}: Received context:key`, data);
             this.currentKey = data.key;
             this.currentScale = data.notes || [];
-        });
+            console.log(`${this.constructor.name}: Updated currentKey=${this.currentKey}, currentScale has ${this.currentScale.length} notes`);
+        });*/
 
         this.subscribe('context:pool', (data) => {
+            console.log(`${this.constructor.name}: Received context:pool`, data);
             this.poolKey = data.poolKey;
             this.tonicNote = data.tonicNote;
             this.currentScale = data.notes || [];
+            console.log(`${this.constructor.name}: Updated to pool ${this.poolKey}, tonicNote=${this.tonicNote}, scale has ${this.currentScale.length} notes`);
         });
+
+        console.log(`${this.constructor.name}: Subscriptions set up complete`);
     }
 
     /**
@@ -220,18 +228,49 @@ export class BaseInstrumentalist extends SonofireBase {
     getNearestScaleNote(note) {
         if (this.currentScale.length === 0) return note;
 
-        let closest = this.currentScale[0];
-        let minDistance = Math.abs(note - closest);
+        // Get pitch classes from scale (0-11)
+        const scalePitchClasses = [...new Set(this.currentScale.map(n => n % 12))];
 
-        this.currentScale.forEach(scaleNote => {
-            const distance = Math.abs(note - scaleNote);
+        // Check if note is already in scale
+        const notePitchClass = note % 12;
+        if (scalePitchClasses.includes(notePitchClass)) {
+            return note; // Already in scale
+        }
+
+        // Find nearest pitch class
+        let closestPC = scalePitchClasses[0];
+        let minDistance = Math.min(
+            Math.abs(notePitchClass - closestPC),
+            12 - Math.abs(notePitchClass - closestPC) // Wraparound distance
+        );
+
+        scalePitchClasses.forEach(pc => {
+            const distance = Math.min(
+                Math.abs(notePitchClass - pc),
+                12 - Math.abs(notePitchClass - pc) // Wraparound distance
+            );
             if (distance < minDistance) {
                 minDistance = distance;
-                closest = scaleNote;
+                closestPC = pc;
             }
         });
 
-        return closest;
+        // Adjust to nearest scale note in same octave
+        const octave = Math.floor(note / 12);
+        let nearestNote = octave * 12 + closestPC;
+
+        // Check if next or previous octave is closer
+        const distanceCurrent = Math.abs(note - nearestNote);
+        const distanceUp = Math.abs(note - (nearestNote + 12));
+        const distanceDown = Math.abs(note - (nearestNote - 12));
+
+        if (distanceUp < distanceCurrent) {
+            nearestNote += 12;
+        } else if (distanceDown < distanceCurrent) {
+            nearestNote -= 12;
+        }
+
+        return nearestNote;
     }
 
     /**

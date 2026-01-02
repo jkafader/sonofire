@@ -1,5 +1,6 @@
 import { BaseInstrumentalist } from './base_instrumentalist.js';
 import { constrainInterval } from '../../lib/generative_algorithms.js';
+import { harmonicContext } from '../../lib/harmonic_context.js';
 
 /**
  * Soloist Component
@@ -11,6 +12,7 @@ export class SonofireSoloist extends BaseInstrumentalist {
         super();
 
         // Soloist-specific settings
+        this.channel = 0;                 // MIDI channel 0 for FM flute synthesis
         this.playingStyle = 'melodic';    // 'melodic', 'rhythmic', 'ambient'
         this.maxInterval = 7;             // Maximum melodic interval (semitones)
         this.listenToData = true;         // Whether to respond to data:point events
@@ -21,7 +23,8 @@ export class SonofireSoloist extends BaseInstrumentalist {
         this.maxNote = 73;                // Maximum note (C#5) - 1.5 octaves
 
         // Deviation tracking for dissonance
-        this.currentDeviation = 0;        // 0.0 (consonant) to 1.0 (very dissonant)
+        this.currentDeviation = null;     // null = no forecast data, 0.0-1.0 = deviation amount
+        this.hasForecastData = false;     // Whether we have forecast/prediction data
     }
 
     /**
@@ -185,6 +188,37 @@ export class SonofireSoloist extends BaseInstrumentalist {
     }
 
     /**
+     * Log note with context (for debugging)
+     * @param {number} note - MIDI note number
+     * @param {string} source - Source of note generation
+     */
+    logNoteContext(note, source) {
+        const noteName = harmonicContext.midiToNoteName(note);
+        const octave = Math.floor(note / 12) - 1; // MIDI octave (C4 = 60)
+        const inScale = this.isInScale(note);
+        const scaleStatus = inScale ? '✓ IN POOL' : '✗ OUT OF POOL';
+
+        // Get pool notes for reference - show unique pitch classes only
+        const uniquePoolNotes = [...new Set(this.currentScale.map(n => harmonicContext.midiToNoteName(n)))].join(' ');
+
+        console.log(`Soloist [${source}]: ${noteName}${octave} (MIDI ${note}) ${scaleStatus}`);
+        if (!inScale) {
+            console.warn(`  ⚠️  Current pool (${this.poolKey || 'unknown'}): ${uniquePoolNotes}`);
+            console.warn(`  ⚠️  Scale length: ${this.currentScale.length}, Scale notes:`, this.currentScale);
+
+            // Debug: what should this note quantize to?
+            if (this.currentScale.length > 0) {
+                const quantized = this.getNearestScaleNote(note);
+                const quantizedName = harmonicContext.midiToNoteName(quantized);
+                const quantizedOctave = Math.floor(quantized / 12) - 1;
+                console.warn(`  ⚠️  Should have quantized to: ${quantizedName}${quantizedOctave} (MIDI ${quantized})`);
+            } else {
+                console.error(`  ❌ SCALE IS EMPTY! Cannot quantize notes!`);
+            }
+        }
+    }
+
+    /**
      * Generate and play next note (triggered by whip automation)
      */
     generateAndPlayNote() {
@@ -193,6 +227,7 @@ export class SonofireSoloist extends BaseInstrumentalist {
         // Generate melodic note based on current musical context
         let note;
 
+        /*
         if (this.lastNote === null) {
             // First note - start on root or chord tone
             if (this.currentChord?.root) {
@@ -232,12 +267,14 @@ export class SonofireSoloist extends BaseInstrumentalist {
             // Apply maxInterval constraint
             note = constrainInterval(this.lastNote, note, this.maxInterval);
         }
-
-        // Quantize to scale
-        note = this.getNearestScaleNote(note);
+        */
+        debugger;
 
         // Clamp to selected range
         note = Math.max(this.minNote, Math.min(this.maxNote, note));
+
+        // Quantize to scale
+        note = this.getNearestScaleNote(note);
 
         // Use whip-controlled velocity or default
         const velocity = this.nextNoteVelocity || 80;
@@ -250,7 +287,8 @@ export class SonofireSoloist extends BaseInstrumentalist {
         this.sendNote(note, velocity, duration);
         this.lastNote = note;
 
-        console.log(`Soloist: Generated note ${note} (vel: ${velocity})`);
+        // Log with context
+        this.logNoteContext(note, 'Whip Automation');
     }
 
     /**
@@ -293,8 +331,15 @@ export class SonofireSoloist extends BaseInstrumentalist {
                 }
             }
 
-            // Apply dissonance based on current deviation
-            note = this.applyDissonance(note, this.currentDeviation);
+            // Apply dissonance ONLY if we have forecast data with deviation
+            if (this.hasForecastData && this.currentDeviation !== null) {
+                note = this.applyDissonance(note, this.currentDeviation);
+
+                // After applying dissonance, quantize back to scale if deviation is low
+                if (this.currentDeviation < 0.2) {
+                    note = this.getNearestScaleNote(note);
+                }
+            }
 
             // Clamp to selected range (after all transformations)
             note = Math.max(this.minNote, Math.min(this.maxNote, note));
@@ -307,6 +352,10 @@ export class SonofireSoloist extends BaseInstrumentalist {
 
             // Send the note
             this.sendNote(note, velocity, duration);
+
+            // Log with context
+            const source = this.hasForecastData ? `Data (dev: ${this.currentDeviation?.toFixed(2) || 'N/A'})` : 'Data';
+            this.logNoteContext(note, source);
         }
     }
 
@@ -319,6 +368,7 @@ export class SonofireSoloist extends BaseInstrumentalist {
             // Assume deviation is in range [0, maxDeviation]
             // Normalize to [0, 1]
             this.currentDeviation = Math.min(data.deviation, 1.0);
+            this.hasForecastData = true;
         }
     }
 

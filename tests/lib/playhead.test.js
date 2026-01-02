@@ -68,21 +68,33 @@ describe('Playhead', () => {
     });
 
     describe('Advance Logic', () => {
-        it('should advance on every tick when speed = 1', () => {
+        it('should advance once per tick when speed = 1', () => {
             playhead.speed = 1;
 
-            expect(playhead.advance()).toBe(true);
-            expect(playhead.tickCounter).toBe(0);
-            expect(playhead.advance()).toBe(true);
-            expect(playhead.tickCounter).toBe(0);
+            expect(playhead.advance()).toBe(1);
+            expect(playhead.advance()).toBe(1);
+            expect(playhead.advance()).toBe(1);
         });
 
         it('should advance every 2 ticks when speed = 1/2', () => {
             playhead.speed = 1/2;
 
-            expect(playhead.advance()).toBe(false);
+            expect(playhead.advance()).toBe(0);
             expect(playhead.tickCounter).toBe(1);
-            expect(playhead.advance()).toBe(true);
+            expect(playhead.advance()).toBe(1);
+            expect(playhead.tickCounter).toBe(0);
+        });
+
+        it('should advance every 4 ticks when speed = 1/4', () => {
+            playhead.speed = 1/4;
+
+            expect(playhead.advance()).toBe(0);
+            expect(playhead.tickCounter).toBe(1);
+            expect(playhead.advance()).toBe(0);
+            expect(playhead.tickCounter).toBe(2);
+            expect(playhead.advance()).toBe(0);
+            expect(playhead.tickCounter).toBe(3);
+            expect(playhead.advance()).toBe(1);
             expect(playhead.tickCounter).toBe(0);
         });
 
@@ -91,28 +103,47 @@ describe('Playhead', () => {
 
             // Advance 15 times - should not trigger
             for (let i = 0; i < 15; i++) {
-                expect(playhead.advance()).toBe(false);
+                expect(playhead.advance()).toBe(0);
             }
             expect(playhead.tickCounter).toBe(15);
 
             // 16th tick should trigger
-            expect(playhead.advance()).toBe(true);
+            expect(playhead.advance()).toBe(1);
             expect(playhead.tickCounter).toBe(0);
         });
 
         it('should advance twice per tick when speed = 2', () => {
             playhead.speed = 2;
 
-            // Speed 2 means ticksNeeded = 1/2 = 0.5
-            // First advance: tickCounter goes from 0 to 1, which is >= 0.5, so should advance
-            expect(playhead.advance()).toBe(true);
-            expect(playhead.tickCounter).toBe(0);
+            // Should return 2 (advance twice per tick)
+            expect(playhead.advance()).toBe(2);
+            expect(playhead.advance()).toBe(2);
+            expect(playhead.advance()).toBe(2);
+        });
+
+        it('should advance 4 times per tick when speed = 4', () => {
+            playhead.speed = 4;
+
+            expect(playhead.advance()).toBe(4);
+            expect(playhead.advance()).toBe(4);
+        });
+
+        it('should advance 8 times per tick when speed = 8', () => {
+            playhead.speed = 8;
+
+            expect(playhead.advance()).toBe(8);
+        });
+
+        it('should advance 16 times per tick when speed = 16', () => {
+            playhead.speed = 16;
+
+            expect(playhead.advance()).toBe(16);
         });
 
         it('should not advance when disabled', () => {
             playhead.enabled = false;
 
-            expect(playhead.advance()).toBe(false);
+            expect(playhead.advance()).toBe(0);
             expect(playhead.tickCounter).toBe(0);
         });
     });

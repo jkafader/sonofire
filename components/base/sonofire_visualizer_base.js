@@ -77,9 +77,9 @@ export class SonofireVisualizerBase extends SonofireBase {
             }
         });
 
-        // Subscribe to key changes to update scale
-        this.subscribe('context:key', (data) => {
-            this.onKeyChange(data);
+        // Subscribe to pool changes to update scale
+        this.subscribe('context:pool', (data) => {
+            this.onPoolChange(data);
         });
 
         // Subscribe to transport controls from Conductor
@@ -109,9 +109,9 @@ export class SonofireVisualizerBase extends SonofireBase {
         super.connectedCallback();
 
         // Discover current harmonic context
-        const keyContext = this.getLastValue('context:key');
-        if (keyContext) {
-            this.onKeyChange(keyContext);
+        const poolContext = this.getLastValue('context:pool');
+        if (poolContext) {
+            this.onPoolChange(poolContext);
         }
 
         // Restore playheads from PubSub
@@ -173,10 +173,14 @@ export class SonofireVisualizerBase extends SonofireBase {
     advanceAllPlayheads() {
         let anyAdvanced = false;
         this.playheads.forEach(playhead => {
-            if (playhead.advance()) {
+            const advanceCount = playhead.advance();
+            if (advanceCount > 0) {
                 // Playhead advanced, update position and sample data
-                this.advancePlayheadPosition(playhead);
-                this.sampleDataAtPlayhead(playhead);
+                // For speeds > 1, advance multiple times
+                for (let i = 0; i < advanceCount; i++) {
+                    this.advancePlayheadPosition(playhead);
+                    this.sampleDataAtPlayhead(playhead);
+                }
                 anyAdvanced = true;
             }
         });
@@ -252,8 +256,8 @@ export class SonofireVisualizerBase extends SonofireBase {
     /**
      * Handle key change from Conductor
      */
-    onKeyChange(keyData) {
-        console.log('Visualizer: Key changed to', keyData.key, keyData.scale);
+    onPoolChange(poolData) {
+        console.log('Visualizer: Pool changed to', poolData.poolKey, '/', poolData.tonicName);
         // Could update scale visualization or note mapping
         // For now, we'll let components use their configured scale
     }

@@ -11,6 +11,7 @@ export class SonofireBassist extends BaseInstrumentalist {
         super();
 
         // Bassist-specific settings
+        this.channel = 1;                 // MIDI channel 1 for plucked string synthesis
         this.bassStyle = 'walking';       // 'roots', 'walking', 'pedal'
         this.walkingDensity = 0.75;       // How often to play (0.0-1.0)
 

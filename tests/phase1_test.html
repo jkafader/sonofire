@@ -135,21 +135,21 @@
             }
         });
 
-        // Subscribe to key changes
-        PubSub.subscribe('context:key', (data) => {
-            log(`Key changed to: ${data.key} ${data.scale}`, 'success');
+        // Subscribe to pool changes
+        PubSub.subscribe('context:pool', (data) => {
+            log(`Pool/Tonic changed to: ${data.poolKey}/${data.tonicName} (${data.notes.length} notes)`, 'success');
         });
 
         // Test functions
         window.testPubSubDefaults = () => {
             log('Testing PubSub defaults...', 'info');
 
-            const key = PubSub.last('context:key');
+            const pool = PubSub.last('context:pool');
             const mood = PubSub.last('context:mood');
             const spareness = PubSub.last('context:spareness');
             const tempo = PubSub.last('clock:tempo');
 
-            log(`Key: ${JSON.stringify(key)}`, key ? 'success' : 'error');
+            log(`Pool: ${JSON.stringify(pool)}`, pool ? 'success' : 'error');
             log(`Mood: ${JSON.stringify(mood)}`, mood ? 'success' : 'error');
             log(`Spareness: ${JSON.stringify(spareness)}`, spareness ? 'success' : 'error');
             log(`Tempo: ${JSON.stringify(tempo)}`, tempo ? 'success' : 'error');
@@ -228,15 +228,15 @@
 
         window.testHarmonicContext = () => {
             log('Setting key to D Major...', 'info');
-            harmonicContext.setKey('D', 'major');
+            harmonicContext.setPoolAndTonic('2♯', 50, 'D');
             log('Key set', 'success');
         };
 
         window.testScaleCheck = () => {
             log('Testing scale membership...', 'info');
             const state = harmonicContext.getCurrentState();
-            log(`Current scale: ${state.key} ${state.scale}`, 'info');
-            log(`Scale notes: ${state.notes.join(', ')}`, 'info');
+            log(`Current pool/tonic: ${state.poolKey}/${state.tonicName}`, 'info');
+            log(`Scale has ${state.notes.length} notes`, 'info');
 
             const testNote = 62; // D4
             const inScale = harmonicContext.isInScale(testNote);
@@ -245,6 +245,10 @@
             const testNote2 = 61; // C#4
             const inScale2 = harmonicContext.isInScale(testNote2);
             log(`Note ${testNote2} (C#) in scale: ${inScale2}`, inScale2 ? 'success' : 'error');
+
+            // Log some of the scale notes for verification
+            const firstNotes = state.notes.slice(0, 10).join(', ');
+            log(`First 10 scale notes: ${firstNotes}`, 'info');
         };
     </script>
 </body>

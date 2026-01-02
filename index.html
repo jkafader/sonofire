@@ -154,15 +154,15 @@
 
         // Subscribe to events for debugging
         PubSub.subscribe('data:point', (data) => {
-            console.log('Data point:', data.note);
+            //console.log('Data point:', data.note);
         });
 
         PubSub.subscribe('music:chord', (data) => {
-            console.log('Chord:', data.chord, data.voicing);
+            //console.log('Chord:', data.chord, data.voicing);
         });
 
-        PubSub.subscribe('context:key', (data) => {
-            console.log('Key:', data.key, data.scale);
+        PubSub.subscribe('context:pool', (data) => {
+            console.log('Pool:', data.poolKey, '/', data.tonicName);
         });
 
         // TEST: Direct clock:tick subscription to verify events are publishing
