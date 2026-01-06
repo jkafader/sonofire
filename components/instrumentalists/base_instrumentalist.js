@@ -63,6 +63,11 @@ export class BaseInstrumentalist extends SonofireBase {
             this.handleChordChange(data);
         });
 
+        // Subscribe to next chord for phrase planning
+        this.subscribe('music:nextChord', (data) => {
+            this.handleNextChordAnnouncement(data);
+        });
+
         this.subscribe('context:mood', (data) => {
             this.mood = data.mood;
         });
@@ -150,6 +155,16 @@ export class BaseInstrumentalist extends SonofireBase {
     handleChordChange(chordData) {
         this.currentChord = chordData;
         console.log(`${this.constructor.name}: Chord changed to ${chordData.chord}`);
+    }
+
+    /**
+     * Handle next chord announcement
+     * Subclasses can override for custom phrase planning behavior
+     */
+    handleNextChordAnnouncement(data) {
+        this.nextChord = data;
+        // Base implementation just stores it
+        // Subclasses like Soloist will override to trigger phrase generation
     }
 
     /**

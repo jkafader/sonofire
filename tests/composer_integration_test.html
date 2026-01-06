@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Composer Integration Tests - Chord Progressions</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 10px;
+        }
+        h2 {
+            color: #569cd6;
+            margin-top: 30px;
+        }
+        .test-suite {
+            background: #252526;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-left: 3px solid #007acc;
+        }
+        .test-result {
+            padding: 8px 12px;
+            margin: 5px 0;
+            font-family: monospace;
+            font-size: 13px;
+            border-radius: 3px;
+        }
+        .test-pass {
+            background: #1a4d2e;
+            color: #4ec9b0;
+            border-left: 3px solid #4ec9b0;
+        }
+        .test-fail {
+            background: #5a1e1e;
+            color: #f48771;
+            border-left: 3px solid #f48771;
+        }
+        .progression-display {
+            background: #1e1e1e;
+            padding: 12px;
+            margin: 10px 0;
+            font-family: monospace;
+            border-radius: 3px;
+            color: #4ec9b0;
+            font-size: 14px;
+            border-left: 3px solid #4ec9b0;
+        }
+        .test-summary {
+            background: #2d2d2d;
+            padding: 15px;
+            margin-top: 20px;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .test-summary.all-pass {
+            border-left: 3px solid #4ec9b0;
+            color: #4ec9b0;
+        }
+        .test-summary.some-fail {
+            border-left: 3px solid #f48771;
+            color: #f48771;
+        }
+        code {
+            background: #1e1e1e;
+            padding: 2px 6px;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎼 Composer Integration Tests</h1>
+    <p>Testing actual chord progression generation with different pool/tonic combinations</p>
+
+    <div id="test-results"></div>
+    <div id="test-summary"></div>
+
+    <script type="module">
+        import { harmonicContext } from '../lib/harmonic_context.js';
+        import { SCALES } from '../lib/midi_data.js';
+        import { getChordQualityForDegreeInPool, selectNextTonicByFunction } from '../lib/music_theory.js';
+
+        const results = [];
+        const resultsEl = document.getElementById('test-results');
+        const summaryEl = document.getElementById('test-summary');
+
+        function assert(condition, testName, details = '') {
+            const result = {
+                pass: condition,
+                name: testName,
+                details: details
+            };
+            results.push(result);
+
+            const div = document.createElement('div');
+            div.className = condition ? 'test-result test-pass' : 'test-result test-fail';
+            div.innerHTML = `${condition ? '✓' : '✗'} ${testName}${details ? '<br>&nbsp;&nbsp;&nbsp;&nbsp;' + details : ''}`;
+            resultsEl.appendChild(div);
+
+            if (!condition) {
+                console.error('TEST FAILED:', testName, details);
+            }
+        }
+
+        function createTestSuite(title) {
+            const div = document.createElement('div');
+            div.className = 'test-suite';
+            div.innerHTML = `<h2>${title}</h2>`;
+            resultsEl.appendChild(div);
+            return div;
+        }
+
+        function showProgression(progression, title) {
+            const div = document.createElement('div');
+            div.className = 'progression-display';
+            const chordString = progression.map(c => c.symbol).join(' → ');
+            div.innerHTML = `<strong>${title}:</strong><br>${chordString}`;
+            resultsEl.appendChild(div);
+        }
+
+        // Simplified version of Composer's generateProgressionProbabilistic
+        function generateProgression(poolKey, startTonicNote, progressionLength = 4) {
+            const progression = [];
+
+            const pool = SCALES[poolKey];
+            const poolPitchClasses = [...new Set(pool.map(n => n % 12))];
+
+            // Map pool to major tonic to find the mode
+            const poolToMajorTonic = {
+                '0': 0, '1♯': 7, '2♯': 2, '3♯': 9, '4♯': 4, '5♯': 11, '6♯': 6,
+                '1♭': 5, '2♭': 10, '3♭': 3, '4♭': 8, '5♭': 1
+            };
+            const majorTonicPC = poolToMajorTonic[poolKey] || 0;
+
+            // Order pitch classes starting from major tonic
+            const orderedPitchClasses = [];
+            for (let i = 0; i < 7; i++) {
+                const pc = (majorTonicPC + [0, 2, 4, 5, 7, 9, 11][i]) % 12;
+                if (poolPitchClasses.includes(pc)) {
+                    orderedPitchClasses.push(pc);
+                }
+            }
+
+            // Find which mode we're in
+            const startTonicPC = startTonicNote % 12;
+            const modeIndex = orderedPitchClasses.indexOf(startTonicPC);
+
+            const modeNames = ['ionian', 'dorian', 'phrygian', 'lydian', 'mixolydian', 'aeolian', 'locrian'];
+            const modeName = modeNames[modeIndex] || 'ionian';
+
+            // Start with degree 1 (relative to our chosen tonic)
+            let currentDegree = 1;
+            let currentTonicNote = startTonicNote;
+
+            for (let i = 0; i < progressionLength; i++) {
+                // Get chord quality for this degree using the appropriate mode
+                const quality = getChordQualityForDegreeInPool(currentDegree, modeName);
+
+                const chord = {
+                    symbol: `${harmonicContext.midiToNoteName(currentTonicNote)}${quality}`,
+                    root: currentTonicNote,
+                    quality: quality,
+                    degree: currentDegree,
+                    poolKey: poolKey,
+                    mode: modeName
+                };
+
+                progression.push(chord);
+
+                // Select next degree/tonic for next iteration (if not last chord)
+                if (i < progressionLength - 1) {
+                    const next = selectNextTonicByFunction(currentDegree, startTonicNote, poolKey, 'jazz');
+                    currentDegree = next.degree;
+                    currentTonicNote = next.tonicNote;
+                }
+            }
+
+            return progression;
+        }
+
+        // ============================================================================
+        // TEST SUITE 1: A Major (3♯/A) - Ionian Mode
+        // ============================================================================
+
+        createTestSuite('1. A Major (Pool 3♯/A) - Ionian Mode');
+
+        const aMajorProgression = generateProgression('3♯', 69, 4); // A = MIDI 69
+        showProgression(aMajorProgression, 'Generated progression');
+
+        assert(aMajorProgression[0].quality === 'maj7',
+            'First chord in A major is maj7 (Amaj7)',
+            `Got: ${aMajorProgression[0].symbol}`);
+
+        assert(aMajorProgression[0].mode === 'ionian',
+            'Mode detected as ionian',
+            `Got: ${aMajorProgression[0].mode}`);
+
+        // Check that all chords are valid major scale harmonies
+        const validMajorQualities = ['maj7', 'min7', '7', 'min7b5'];
+        aMajorProgression.forEach((chord, idx) => {
+            assert(validMajorQualities.includes(chord.quality),
+                `Chord ${idx + 1} has valid major scale quality`,
+                `${chord.symbol} (${chord.quality})`);
+        });
+
+        // ============================================================================
+        // TEST SUITE 2: F♯ Minor (3♯/F♯) - Aeolian Mode [CRITICAL REGRESSION TEST]
+        // ============================================================================
+
+        createTestSuite('2. F♯ Minor (Pool 3♯/F♯) - Aeolian Mode [REGRESSION TEST]');
+
+        const fSharpMinorProgression = generateProgression('3♯', 66, 4); // F♯ = MIDI 66
+        showProgression(fSharpMinorProgression, 'Generated progression');
+
+        assert(fSharpMinorProgression[0].quality === 'min7',
+            '🔥 CRITICAL: First chord in F♯ minor is min7 (F♯m7), NOT maj7',
+            `Got: ${fSharpMinorProgression[0].symbol}`);
+
+        assert(fSharpMinorProgression[0].mode === 'aeolian',
+            'Mode detected as aeolian',
+            `Got: ${fSharpMinorProgression[0].mode}`);
+
+        // Expected qualities in natural minor: min7, min7b5, maj7, min7, min7, maj7, 7
+        const validMinorQualities = ['min7', 'min7b5', 'maj7', '7'];
+        fSharpMinorProgression.forEach((chord, idx) => {
+            assert(validMinorQualities.includes(chord.quality),
+                `Chord ${idx + 1} has valid natural minor quality`,
+                `${chord.symbol} (${chord.quality})`);
+        });
+
+        // Specifically check that we DON'T get F♯maj7
+        assert(!fSharpMinorProgression.some(c => c.symbol === 'F♯maj7'),
+            'Progression does NOT contain F♯maj7 (the bug)',
+            fSharpMinorProgression.map(c => c.symbol).join(', '));
+
+        // ============================================================================
+        // TEST SUITE 3: C Major (0/C) - Ionian Mode
+        // ============================================================================
+
+        createTestSuite('3. C Major (Pool 0/C) - Ionian Mode');
+
+        const cMajorProgression = generateProgression('0', 60, 4); // C = MIDI 60
+        showProgression(cMajorProgression, 'Generated progression');
+
+        assert(cMajorProgression[0].quality === 'maj7',
+            'First chord in C major is maj7 (Cmaj7)',
+            `Got: ${cMajorProgression[0].symbol}`);
+
+        assert(cMajorProgression[0].mode === 'ionian',
+            'Mode detected as ionian',
+            `Got: ${cMajorProgression[0].mode}`);
+
+        // ============================================================================
+        // TEST SUITE 4: A Minor (0/A) - Aeolian Mode
+        // ============================================================================
+
+        createTestSuite('4. A Minor (Pool 0/A) - Aeolian Mode');
+
+        const aMinorProgression = generateProgression('0', 69, 4); // A = MIDI 69
+        showProgression(aMinorProgression, 'Generated progression');
+
+        assert(aMinorProgression[0].quality === 'min7',
+            'First chord in A minor is min7 (Am7)',
+            `Got: ${aMinorProgression[0].symbol}`);
+
+        assert(aMinorProgression[0].mode === 'aeolian',
+            'Mode detected as aeolian',
+            `Got: ${aMinorProgression[0].mode}`);
+
+        // ============================================================================
+        // TEST SUITE 5: D Dorian (0/D) - Dorian Mode
+        // ============================================================================
+
+        createTestSuite('5. D Dorian (Pool 0/D) - Dorian Mode');
+
+        const dDorianProgression = generateProgression('0', 62, 4); // D = MIDI 62
+        showProgression(dDorianProgression, 'Generated progression');
+
+        assert(dDorianProgression[0].quality === 'min7',
+            'First chord in D dorian is min7 (Dm7)',
+            `Got: ${dDorianProgression[0].symbol}`);
+
+        assert(dDorianProgression[0].mode === 'dorian',
+            'Mode detected as dorian',
+            `Got: ${dDorianProgression[0].mode}`);
+
+        // ============================================================================
+        // TEST SUITE 6: E Phrygian (0/E) - Phrygian Mode
+        // ============================================================================
+
+        createTestSuite('6. E Phrygian (Pool 0/E) - Phrygian Mode');
+
+        const ePhrygianProgression = generateProgression('0', 64, 4); // E = MIDI 64
+        showProgression(ePhrygianProgression, 'Generated progression');
+
+        assert(ePhrygianProgression[0].quality === 'min7',
+            'First chord in E phrygian is min7 (Em7)',
+            `Got: ${ePhrygianProgression[0].symbol}`);
+
+        assert(ePhrygianProgression[0].mode === 'phrygian',
+            'Mode detected as phrygian',
+            `Got: ${ePhrygianProgression[0].mode}`);
+
+        // ============================================================================
+        // TEST SUITE 7: F Lydian (0/F) - Lydian Mode
+        // ============================================================================
+
+        createTestSuite('7. F Lydian (Pool 0/F) - Lydian Mode');
+
+        const fLydianProgression = generateProgression('0', 65, 4); // F = MIDI 65
+        showProgression(fLydianProgression, 'Generated progression');
+
+        assert(fLydianProgression[0].quality === 'maj7',
+            'First chord in F lydian is maj7 (Fmaj7)',
+            `Got: ${fLydianProgression[0].symbol}`);
+
+        assert(fLydianProgression[0].mode === 'lydian',
+            'Mode detected as lydian',
+            `Got: ${fLydianProgression[0].mode}`);
+
+        // ============================================================================
+        // TEST SUITE 8: G Mixolydian (0/G) - Mixolydian Mode
+        // ============================================================================
+
+        createTestSuite('8. G Mixolydian (Pool 0/G) - Mixolydian Mode');
+
+        const gMixolydianProgression = generateProgression('0', 67, 4); // G = MIDI 67
+        showProgression(gMixolydianProgression, 'Generated progression');
+
+        assert(gMixolydianProgression[0].quality === '7',
+            'First chord in G mixolydian is 7 (G7)',
+            `Got: ${gMixolydianProgression[0].symbol}`);
+
+        assert(gMixolydianProgression[0].mode === 'mixolydian',
+            'Mode detected as mixolydian',
+            `Got: ${gMixolydianProgression[0].mode}`);
+
+        // ============================================================================
+        // TEST SUITE 9: B Locrian (0/B) - Locrian Mode
+        // ============================================================================
+
+        createTestSuite('9. B Locrian (Pool 0/B) - Locrian Mode');
+
+        const bLocrianProgression = generateProgression('0', 71, 4); // B = MIDI 71
+        showProgression(bLocrianProgression, 'Generated progression');
+
+        assert(bLocrianProgression[0].quality === 'min7b5',
+            'First chord in B locrian is min7b5 (Bm7b5)',
+            `Got: ${bLocrianProgression[0].symbol}`);
+
+        assert(bLocrianProgression[0].mode === 'locrian',
+            'Mode detected as locrian',
+            `Got: ${bLocrianProgression[0].mode}`);
+
+        // ============================================================================
+        // TEST SUITE 10: All Pool 3♯ Modes
+        // ============================================================================
+
+        createTestSuite('10. All Modes in Pool 3♯');
+
+        const pool3SharpTests = [
+            { tonic: 69, name: 'A', expectedMode: 'ionian', expectedQuality: 'maj7' },
+            { tonic: 71, name: 'B', expectedMode: 'dorian', expectedQuality: 'min7' },
+            { tonic: 61, name: 'C♯', expectedMode: 'phrygian', expectedQuality: 'min7' },
+            { tonic: 62, name: 'D', expectedMode: 'lydian', expectedQuality: 'maj7' },
+            { tonic: 64, name: 'E', expectedMode: 'mixolydian', expectedQuality: '7' },
+            { tonic: 66, name: 'F♯', expectedMode: 'aeolian', expectedQuality: 'min7' },
+            { tonic: 68, name: 'G♯', expectedMode: 'locrian', expectedQuality: 'min7b5' }
+        ];
+
+        pool3SharpTests.forEach(test => {
+            const prog = generateProgression('3♯', test.tonic, 1);
+            assert(prog[0].mode === test.expectedMode,
+                `3♯/${test.name} detected as ${test.expectedMode}`,
+                `Got: ${prog[0].mode}`);
+            assert(prog[0].quality === test.expectedQuality,
+                `3♯/${test.name} tonic chord is ${test.expectedQuality}`,
+                `Got: ${prog[0].symbol}`);
+        });
+
+        // ============================================================================
+        // TEST SUITE 11: Progression Length Consistency
+        // ============================================================================
+
+        createTestSuite('11. Progression Length Consistency');
+
+        for (let length = 2; length <= 8; length++) {
+            const prog = generateProgression('3♯', 69, length);
+            assert(prog.length === length,
+                `Generated progression of length ${length}`,
+                `Got: ${prog.length} chords`);
+        }
+
+        // ============================================================================
+        // SUMMARY
+        // ============================================================================
+
+        const passCount = results.filter(r => r.pass).length;
+        const failCount = results.filter(r => !r.pass).length;
+        const totalCount = results.length;
+
+        summaryEl.className = failCount === 0 ? 'test-summary all-pass' : 'test-summary some-fail';
+        summaryEl.innerHTML = `
+            <div>Test Summary: ${passCount}/${totalCount} tests passed</div>
+            ${failCount > 0 ? `<div style="margin-top: 10px;">❌ ${failCount} test(s) failed - see console for details</div>` : '<div style="margin-top: 10px;">✓ All tests passed!</div>'}
+        `;
+
+        if (failCount === 0) {
+            console.log('%c✓ ALL INTEGRATION TESTS PASSED', 'color: #4ec9b0; font-size: 16px; font-weight: bold;');
+        } else {
+            console.error('%c✗ SOME INTEGRATION TESTS FAILED', 'color: #f48771; font-size: 16px; font-weight: bold;');
+        }
+    </script>
+</body>
+</html>

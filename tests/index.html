@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sonofire Test Suite</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 10px;
+        }
+        h2 {
+            color: #569cd6;
+            margin-top: 30px;
+        }
+        .info {
+            background: #252526;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-left: 3px solid #007acc;
+        }
+        .test-link {
+            display: block;
+            background: #2d2d2d;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 3px solid #4ec9b0;
+            text-decoration: none;
+            color: #d4d4d4;
+            border-radius: 3px;
+            transition: background 0.2s;
+        }
+        .test-link:hover {
+            background: #3d3d3d;
+        }
+        .test-link h3 {
+            margin: 0 0 8px 0;
+            color: #4ec9b0;
+        }
+        .test-link p {
+            margin: 0;
+            font-size: 14px;
+            color: #888;
+        }
+        .badge {
+            display: inline-block;
+            background: #0e639c;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-left: 10px;
+            font-weight: normal;
+        }
+        .badge.unit {
+            background: #4ec9b0;
+        }
+        .badge.integration {
+            background: #569cd6;
+        }
+        .badge.critical {
+            background: #f48771;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Sonofire Test Suite</h1>
+
+    <div class="info">
+        <p><strong>Automated Tests for Sonofire Data Sonification System</strong></p>
+        <p>Click on any test below to run it in a new tab. All tests are browser-based and run instantly.</p>
+    </div>
+
+    <h2>Music Theory Tests</h2>
+
+    <a href="music_theory_test.html" target="_blank" class="test-link">
+        <h3>Modal Harmonization Tests <span class="badge unit">Unit</span></h3>
+        <p>Tests all 7 modal harmonization tables (Ionian, Dorian, Phrygian, Lydian, Mixolydian, Aeolian, Locrian)</p>
+        <p><strong>Coverage:</strong> 80+ assertions covering chord qualities, mode detection, edge cases, and aliases</p>
+    </a>
+
+    <a href="composer_integration_test.html" target="_blank" class="test-link">
+        <h3>Composer Integration Tests <span class="badge integration">Integration</span> <span class="badge critical">Critical</span></h3>
+        <p>Tests actual chord progression generation with different pool/tonic combinations</p>
+        <p><strong>Coverage:</strong> All 7 modes in pool 0 and pool 3♯, including regression test for F♯ Aeolian bug</p>
+        <p><strong>🔥 Critical Test:</strong> Verifies 3♯/F♯ generates F♯m7 (not F♯maj7)</p>
+    </a>
+
+    <h2>Legacy Tests</h2>
+
+    <a href="phase1_test.html" target="_blank" class="test-link">
+        <h3>Phase 1 Tests <span class="badge unit">Unit</span></h3>
+        <p>Core infrastructure tests (PubSub, MIDI Clock, Audio Router, Harmonic Context)</p>
+    </a>
+
+    <h2>How to Run Tests</h2>
+
+    <div class="info">
+        <h3>Running Tests</h3>
+        <ol>
+            <li>Click on any test link above to open it in a new tab</li>
+            <li>Tests run automatically on page load</li>
+            <li>Results are displayed with ✓ (pass) or ✗ (fail) indicators</li>
+            <li>Open browser console (F12) for detailed output</li>
+        </ol>
+
+        <h3>Test Output Format</h3>
+        <ul>
+            <li><strong style="color: #4ec9b0;">Green background:</strong> Test passed ✓</li>
+            <li><strong style="color: #f48771;">Red background:</strong> Test failed ✗</li>
+            <li><strong>Summary:</strong> Displayed at bottom showing total pass/fail count</li>
+        </ul>
+
+        <h3>Expected Results</h3>
+        <p>All tests should pass. If any tests fail:</p>
+        <ul>
+            <li>Check the console for detailed error messages</li>
+            <li>Failed tests show expected vs. actual values</li>
+            <li>Fix the underlying code and re-run the test</li>
+        </ul>
+
+        <h3>Critical Regression Test</h3>
+        <p>The <strong>Composer Integration Tests</strong> include a critical regression test for the bug where pool 3♯ with tonic F♯ (F♯ Aeolian/minor) was generating F♯maj7 instead of F♯min7.</p>
+        <p><strong>Test location:</strong> composer_integration_test.html → Test Suite 2</p>
+        <p><strong>Expected:</strong> First chord in 3♯/F♯ progression is F♯m7</p>
+    </div>
+
+    <h2>Test Coverage Summary</h2>
+
+    <div class="info">
+        <h3>Music Theory Tests (music_theory_test.html)</h3>
+        <ul>
+            <li>✓ All 7 modal harmonization tables (7 degrees × 7 modes = 49 tests)</li>
+            <li>✓ Mode name aliases (major = ionian, minor = aeolian)</li>
+            <li>✓ Pool/tonic to mode detection for all 7 modes</li>
+            <li>✓ Integration tests for expected chord qualities</li>
+            <li>✓ Edge cases (invalid degrees, invalid modes, case insensitivity)</li>
+        </ul>
+
+        <h3>Composer Integration Tests (composer_integration_test.html)</h3>
+        <ul>
+            <li>✓ A Major (3♯/A) - Ionian mode progression</li>
+            <li>✓ F♯ Minor (3♯/F♯) - Aeolian mode progression [REGRESSION TEST]</li>
+            <li>✓ C Major (0/C) - Ionian mode progression</li>
+            <li>✓ A Minor (0/A) - Aeolian mode progression</li>
+            <li>✓ D Dorian (0/D) - Dorian mode progression</li>
+            <li>✓ E Phrygian (0/E) - Phrygian mode progression</li>
+            <li>✓ F Lydian (0/F) - Lydian mode progression</li>
+            <li>✓ G Mixolydian (0/G) - Mixolydian mode progression</li>
+            <li>✓ B Locrian (0/B) - Locrian mode progression</li>
+            <li>✓ All 7 modes in pool 3♯</li>
+            <li>✓ Progression length consistency (2-8 chords)</li>
+        </ul>
+    </div>
+</body>
+</html>

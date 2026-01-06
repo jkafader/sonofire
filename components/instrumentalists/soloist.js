@@ -1,6 +1,7 @@
 import { BaseInstrumentalist } from './base_instrumentalist.js';
 import { constrainInterval } from '../../lib/generative_algorithms.js';
 import { harmonicContext } from '../../lib/harmonic_context.js';
+import { WhipManager } from '../../lib/whip_manager.js';
 
 /**
  * Soloist Component
@@ -25,6 +26,23 @@ export class SonofireSoloist extends BaseInstrumentalist {
         // Deviation tracking for dissonance
         this.currentDeviation = null;     // null = no forecast data, 0.0-1.0 = deviation amount
         this.hasForecastData = false;     // Whether we have forecast/prediction data
+
+        // Phrase-based melody generation state
+        this.currentPhrase = null;        // Array of note objects {note, velocity, duration, harmonicRole}
+        this.phraseIndex = 0;              // Current position in phrase
+        this.lastPhraseMelody = null;      // Previous phrase for variation tracking
+        this.nextChord = null;             // Next chord information
+        this.lookaheadInfo = null;         // Lookahead data from visualizer
+
+        // Phrase generation weights (can be modified via whip parameters)
+        this.trendWeight = 0.30;           // Weight for data trend influence
+        this.harmonicWeight = 0.40;        // Weight for harmonic structure
+        this.tensionWeight = 0.20;         // Weight for tension/resolution
+        this.continuityWeight = 0.10;      // Weight for melodic continuity
+
+        // Playhead binding tracking
+        this.boundPlayheadId = null;       // ID of playhead bound to noteGeneration parameter
+        this.lookaheadSubscription = null; // Track lookahead subscription for cleanup
     }
 
     /**
@@ -98,6 +116,23 @@ export class SonofireSoloist extends BaseInstrumentalist {
     setupSubscriptions() {
         super.setupSubscriptions();
 
+        // Subscribe to next chord for phrase planning
+        this.subscribe('music:nextChord', (data) => {
+            this.nextChord = data;
+            console.log('Soloist: Received next chord:', data.chord);
+        });
+
+        // Detect bound playhead and subscribe to its lookahead
+        this.detectAndSubscribeToBoundPlayhead();
+
+        // Listen for new bindings being created
+        this.subscribe('whip:binding:register', (data) => {
+            if (data.targetComponentId === this.id && data.targetParameterId === 'noteGeneration') {
+                console.log('Soloist: New binding detected to noteGeneration parameter');
+                this.detectAndSubscribeToBoundPlayhead();
+            }
+        });
+
         if (this.listenToData) {
             // Subscribe to data points from visualizers
             this.subscribe('data:point', (data) => {
@@ -112,6 +147,51 @@ export class SonofireSoloist extends BaseInstrumentalist {
     }
 
     /**
+     * Detect which playhead is bound to noteGeneration and subscribe to its lookahead
+     */
+    detectAndSubscribeToBoundPlayhead() {
+        // Query WhipManager for bindings to our noteGeneration parameter
+        const bindings = WhipManager.getBindingsForTarget(this.id, 'noteGeneration');
+
+        if (bindings.length === 0) {
+            console.log('Soloist: No playhead bound to noteGeneration, subscribing to general data:lookahead');
+            this.boundPlayheadId = null;
+
+            // Subscribe to general lookahead (first playhead)
+            this.subscribe('data:lookahead', (data) => {
+                this.lookaheadInfo = data;
+                console.log('Soloist: Received lookahead data (general):', {
+                    playheadId: data.playheadId,
+                    eventCount: data.estimatedEventCount,
+                    trend: data.trend.direction
+                });
+            });
+            return;
+        }
+
+        // Use the first binding (in case multiple playheads are bound)
+        const binding = bindings[0];
+        const playheadId = binding.sourcePlayheadId;
+
+        if (this.boundPlayheadId === playheadId) {
+            return; // Already subscribed to this playhead
+        }
+
+        this.boundPlayheadId = playheadId;
+        console.log(`Soloist: Bound to playhead ${playheadId}, subscribing to data:lookahead:${playheadId}`);
+
+        // Subscribe to specific playhead's lookahead topic
+        const topic = `data:lookahead:${playheadId}`;
+        this.subscribe(topic, (data) => {
+            this.lookaheadInfo = data;
+            console.log(`Soloist: Received lookahead data from playhead ${playheadId}:`, {
+                eventCount: data.estimatedEventCount,
+                trend: data.trend.direction
+            });
+        });
+    }
+
+    /**
      * Initialize when connected
      */
     connectedCallback() {
@@ -119,6 +199,11 @@ export class SonofireSoloist extends BaseInstrumentalist {
 
         // Register whippable parameters (after render)
         this.registerWhippableParameters();
+
+        // Detect bound playhead after a delay (to catch restored bindings)
+        setTimeout(() => {
+            this.detectAndSubscribeToBoundPlayhead();
+        }, 200);
     }
 
     /**
@@ -219,83 +304,334 @@ export class SonofireSoloist extends BaseInstrumentalist {
     }
 
     /**
+     * Override: Handle chord change by triggering phrase generation
+     */
+    handleChordChange(data) {
+        super.handleChordChange(data); // Update this.currentChord
+
+        // Wait a moment for nextChord and lookahead to arrive
+        setTimeout(() => {
+            this.currentPhrase = this.generatePhrase();
+            this.phraseIndex = 0;
+            console.log(`Soloist: Generated phrase with ${this.currentPhrase?.length || 0} notes`);
+        }, 150); // Wait 150ms for all context to arrive
+    }
+
+    /**
+     * Generate a melodic phrase based on current context
+     * @returns {Array|null} Array of note objects or null if insufficient info
+     */
+    generatePhrase() {
+        if (!this.currentChord || !this.nextChord || !this.lookaheadInfo) {
+            console.warn('Soloist: Insufficient info for phrase generation', {
+                hasCurrentChord: !!this.currentChord,
+                hasNextChord: !!this.nextChord,
+                hasLookahead: !!this.lookaheadInfo
+            });
+            return null;
+        }
+
+        const phraseLength = Math.max(4, this.lookaheadInfo.estimatedEventCount);
+        const currentChordTones = this.currentChord.voicing || [];
+        const nextChordTones = this.nextChord.voicing || [];
+        const poolNotes = this.currentScale || [];
+        const trend = this.lookaheadInfo.trend;
+
+        console.log(`Soloist: Generating phrase of length ${phraseLength}, trend: ${trend.direction}`);
+
+        // Generate phrase structure
+        const phrase = [];
+
+        for (let i = 0; i < phraseLength; i++) {
+            const position = i / phraseLength; // 0.0 to 1.0
+            const note = this.selectNoteForPosition({
+                position,
+                currentChordTones,
+                nextChordTones,
+                poolNotes,
+                trend,
+                lastNote: i > 0 ? phrase[i-1].note : this.lastNote
+            });
+
+            phrase.push({
+                note: note,
+                velocity: this.calculateVelocity(),
+                duration: this.calculateDuration(),
+                harmonicRole: this.identifyHarmonicRole(note, position)
+            });
+        }
+
+        return phrase;
+    }
+
+    /**
+     * Select note for a given position in the phrase
+     * @param {Object} params - Parameters for note selection
+     * @returns {number} MIDI note number
+     */
+    selectNoteForPosition({ position, currentChordTones, nextChordTones, poolNotes, trend, lastNote }) {
+        // 1. Calculate target pitch based on data trend
+        const trendContribution = this.calculateTrendContribution(position, trend, lastNote);
+
+        // 2. Calculate harmonic target
+        const harmonicContribution = this.calculateHarmonicContribution(
+            position,
+            currentChordTones,
+            nextChordTones
+        );
+
+        // 3. Calculate tension/resolution arc
+        const tensionContribution = this.calculateTensionContribution(position);
+
+        // 4. Combine weighted targets
+        const targetMIDI = (
+            trendContribution * this.trendWeight +
+            harmonicContribution * this.harmonicWeight +
+            tensionContribution * this.tensionWeight +
+            (lastNote || 60) * this.continuityWeight
+        );
+
+        // 5. Constrain to pool notes
+        let selectedNote = this.getNearestChordalNote(Math.round(targetMIDI));
+
+        // 6. Apply interval constraint
+        /*if (lastNote) {
+            selectedNote = constrainInterval(lastNote, selectedNote, this.maxInterval);
+            selectedNote = this.getNearestScaleNote(selectedNote); // Re-quantize
+        }*/
+
+        // 7. Range clamp
+        //selectedNote = Math.max(this.minNote, Math.min(this.maxNote, selectedNote));
+
+        return selectedNote;
+    }
+
+    /**
+     * Get nearest scale note
+     * @param {number} note - MIDI note number
+     * @returns {number} Nearest note in scale
+     */
+    getNearestChordalNote(note) {
+        const currentChordTones = this.currentChord.voicing || [];
+        const nextChordTones = this.nextChord.voicing || [];
+        const chordalNotes = currentChordTones.concat(nextChordTones);
+
+        // Get pitch classes from scale (0-11)
+        const chordalPitchClasses = [...new Set(chordalNotes.map(n => n % 12))];
+
+        // Check if note is already in scale
+        const notePitchClass = note % 12;
+        if (chordalPitchClasses.includes(notePitchClass)) {
+            return note; // Already in scale
+        }
+
+        // Find nearest pitch class
+        let closestPC = chordalPitchClasses[0];
+        let minDistance = Math.min(
+            Math.abs(notePitchClass - closestPC),
+            12 - Math.abs(notePitchClass - closestPC) // Wraparound distance
+        );
+
+        chordalPitchClasses.forEach(pc => {
+            const distance = Math.min(
+                Math.abs(notePitchClass - pc),
+                12 - Math.abs(notePitchClass - pc) // Wraparound distance
+            );
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestPC = pc;
+            }
+        });
+
+        // Adjust to nearest scale note in same octave
+        const octave = Math.floor(note / 12);
+        let nearestNote = octave * 12 + closestPC;
+
+        // Check if next or previous octave is closer
+        const distanceCurrent = Math.abs(note - nearestNote);
+        const distanceUp = Math.abs(note - (nearestNote + 12));
+        const distanceDown = Math.abs(note - (nearestNote - 12));
+
+        if (distanceUp < distanceCurrent) {
+            nearestNote += 12;
+        } else if (distanceDown < distanceCurrent) {
+            nearestNote -= 12;
+        }
+
+        return nearestNote;
+    }
+
+    /**
+     * Calculate trend contribution to target pitch
+     */
+    calculateTrendContribution(position, trend, lastNote) {
+        const baseNote = lastNote || 60;
+        const range = this.maxNote - this.minNote;
+
+        if (trend.direction === 'rising') {
+            // Move up proportionally to slope and position in phrase
+            return baseNote + (trend.slope * range * position * 0.5);
+        } else if (trend.direction === 'falling') {
+            return baseNote + (trend.slope * range * position * 0.5); // slope is negative
+        } else {
+            return baseNote; // Flat trend, stay around same pitch
+        }
+    }
+
+    /**
+     * Calculate harmonic contribution to target pitch
+     */
+    calculateHarmonicContribution(position, currentChordTones, nextChordTones) {
+        if (currentChordTones.length === 0) {
+            return 60; // Default to middle C if no chord tones
+        }
+
+        // Early in phrase: favor current chord tones
+        // Late in phrase: favor next chord tones (voice leading)
+        if (position < 0.7) {
+            // Use current chord tones
+            const index = Math.floor(Math.random() * currentChordTones.length);
+            return currentChordTones[index];
+        } else {
+            if (nextChordTones.length === 0) {
+                return currentChordTones[0]; // Fallback to current chord
+            }
+
+            // Approach next chord - find common tones or stepwise motion
+            const commonTones = currentChordTones.filter(note =>
+                nextChordTones.includes(note)
+            );
+
+            if (commonTones.length > 0 && Math.random() < 0.6) {
+                // Use common tone (smooth voice leading)
+                return commonTones[Math.floor(Math.random() * commonTones.length)];
+            } else {
+                // Approach next chord root or 3rd
+                const target = Math.random() < 0.7 ? nextChordTones[0] : nextChordTones[1] || nextChordTones[0];
+                return target;
+            }
+        }
+    }
+
+    /**
+     * Calculate tension contribution to target pitch
+     */
+    calculateTensionContribution(position) {
+        // Create arc: low tension → high tension → resolution
+        // Tension peaks around position 0.7-0.8, resolves at 1.0
+        const tensionPeak = position > 0.6 && position < 0.85;
+
+        if (tensionPeak && this.currentChord?.voicing) {
+            // Add tension via upper extensions or non-chord tones
+            const tensionNote = this.currentChord.voicing[0] + 14; // 9th above root
+            return tensionNote;
+        } else if (position > 0.85 && this.nextChord?.root) {
+            // Resolution: target next chord root or common tone
+            return this.nextChord.root;
+        } else if (this.currentChord?.root) {
+            // Stable: current chord root or 5th
+            return this.currentChord.root;
+        } else {
+            return 60; // Default
+        }
+    }
+
+    /**
+     * Identify harmonic role of a note at a position
+     */
+    identifyHarmonicRole(note, position) {
+        if (!this.currentChord?.voicing) {
+            return 'scale-tone';
+        }
+
+        const chordTones = this.currentChord.voicing;
+        const pitchClass = note % 12;
+
+        if (chordTones.some(ct => ct % 12 === pitchClass)) {
+            return 'chord-tone';
+        } else if (position > 0.7) {
+            return 'approach-tone';
+        } else {
+            return 'passing-tone';
+        }
+    }
+
+    /**
      * Generate and play next note (triggered by whip automation)
+     * Now uses pre-generated phrase if available
      */
     generateAndPlayNote() {
         if (!this.enabled) return;
 
-        // Generate melodic note based on current musical context
-        let note;
+        // If we have a pre-generated phrase, use it
+        if (this.currentPhrase && this.phraseIndex < this.currentPhrase.length) {
+            const phraseNote = this.currentPhrase[this.phraseIndex];
 
-        /*
-        if (this.lastNote === null) {
-            // First note - start on root or chord tone
-            if (this.currentChord?.root) {
-                // Get pitch class and place in middle of soloist's range
-                const pitchClass = this.currentChord.root % 12;
-                const middleOctave = Math.floor((this.minNote + this.maxNote) / 24) * 12;
-                note = middleOctave + pitchClass;
-                // Ensure it's in range
-                while (note < this.minNote) note += 12;
-                while (note > this.maxNote) note -= 12;
-            } else if (this.currentScale?.length > 0) {
-                note = this.currentScale[0];
-                // Adjust to soloist's range
-                while (note < this.minNote) note += 12;
-                while (note > this.maxNote) note -= 12;
-            } else {
-                note = 60; // Default to middle C
-            }
+            this.sendNote(
+                phraseNote.note,
+                phraseNote.velocity,
+                phraseNote.duration
+            );
+
+            this.lastNote = phraseNote.note;
+            this.phraseIndex++;
+
+            console.log(`Soloist: Playing phrase note ${this.phraseIndex}/${this.currentPhrase.length}`, {
+                note: phraseNote.note,
+                role: phraseNote.harmonicRole
+            });
         } else {
-            // Generate next note with melodic logic
-            // Bias toward chord tones if available
-            if (this.currentChord?.voicing && Math.random() < 0.6) {
-                // 60% chance to use chord tone
+            // Fallback to simple note generation if no phrase available
+            console.warn('Soloist: No phrase available, using fallback');
+            let note = this.lastNote || 60;
+
+            if (this.currentChord?.voicing && this.currentChord.voicing.length > 0) {
                 const chordTones = this.currentChord.voicing;
                 note = chordTones[Math.floor(Math.random() * chordTones.length)];
-                // Adjust to current octave range
-                while (note < this.lastNote - 12) note += 12;
-                while (note > this.lastNote + 12) note -= 12;
-            } else {
-                // Use scale-based melodic motion
-                const direction = Math.random() < 0.5 ? 1 : -1;
-                const stepSize = Math.floor(Math.random() * 3) + 1; // 1-3 scale steps
-                note = this.lastNote + (direction * stepSize * 2); // Approximately scale steps
-                note = this.getNearestScaleNote(note);
             }
 
-            // Apply maxInterval constraint
-            note = constrainInterval(this.lastNote, note, this.maxInterval);
+            note = this.getNearestScaleNote(note);
+            note = Math.max(this.minNote, Math.min(this.maxNote, note));
+
+            const velocity = this.nextNoteVelocity || 80;
+            const duration = 300 * (1 + this.spareness);
+
+            this.sendNote(note, velocity, duration);
+            this.lastNote = note;
         }
-        */
-        debugger;
-
-        // Clamp to selected range
-        note = Math.max(this.minNote, Math.min(this.maxNote, note));
-
-        // Quantize to scale
-        note = this.getNearestScaleNote(note);
-
-        // Use whip-controlled velocity or default
-        const velocity = this.nextNoteVelocity || 80;
-
-        // Duration based on spareness
-        const baseDuration = 300;
-        const duration = baseDuration * (1 + this.spareness);
-
-        // Send note
-        this.sendNote(note, velocity, duration);
-        this.lastNote = note;
-
-        // Log with context
-        this.logNoteContext(note, 'Whip Automation');
     }
 
     /**
      * Handle data point from visualizer
+     * Uses pre-generated phrase if available, falls back to reactive mode
      */
     handleDataPoint(data) {
         if (!this.enabled) return;
+
+        // If we have a pre-generated phrase, use it
+        if (this.currentPhrase && this.phraseIndex < this.currentPhrase.length) {
+            const phraseNote = this.currentPhrase[this.phraseIndex];
+
+            // Send the phrase note
+            this.sendNote(
+                phraseNote.note,
+                phraseNote.velocity,
+                phraseNote.duration
+            );
+
+            this.lastNote = phraseNote.note;
+            this.phraseIndex++;
+
+            console.log(`Soloist: Playing phrase note ${this.phraseIndex}/${this.currentPhrase.length}`, {
+                note: phraseNote.note,
+                role: phraseNote.harmonicRole
+            });
+
+            return; // Done with phrase-based note
+        }
+
+        // FALLBACK: Reactive mode if no phrase available
+        console.log('Soloist: Using reactive mode (no phrase)');
 
         // Use the note provided by the visualizer, or generate from value
         let note = data.note;

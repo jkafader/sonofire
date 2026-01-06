@@ -3,3 +3,4 @@
 http.log
 node_modules
 __screenshots__
+.DS_Store

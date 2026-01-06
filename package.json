@@ -7,6 +7,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
+    "test:browser": "vitest --browser.headless=false",
+    "test:browser:ui": "vitest --ui --browser.headless=false",
     "test:coverage": "vitest run --coverage",
     "dev": "make dev"
   },

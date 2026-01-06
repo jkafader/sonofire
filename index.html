@@ -33,6 +33,21 @@
         button:hover {
             background: #1177bb;
         }
+        button.panic {
+            background: #d32f2f;
+            font-weight: bold;
+            font-size: 16px;
+            padding: 10px 20px;
+        }
+        button.panic:hover {
+            background: #f44336;
+        }
+        #panic-container {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #252526;
+            border-left: 3px solid #d32f2f;
+        }
         #status {
             margin-top: 10px;
             padding: 10px;
@@ -45,11 +60,44 @@
 <body>
     <h1>Sonofire: Data Sonification System</h1>
 
+    <div id="panic-container">
+        <button class="panic" onclick="midiPanic()">🚨 MIDI PANIC - Stop All Notes</button>
+        <p style="margin: 10px 0 0 0; font-size: 14px; color: #888;">Click to immediately stop all playing notes on all channels</p>
+    </div>
+
     <div class="info">
-        <p><strong>Phase 3:</strong> Added Conductor & Composer control components</p>
-        <p>The Conductor manages harmonic context and MIDI Clock. The Composer generates chord progressions.</p>
+        <ul>
+            <li>The <strong>Conductor</strong> manages harmonic context and MIDI Clock.</li>
+            <li>The <strong>Composer</strong> generates chord progressions from the harmonic context.</li>
+            <li>The <strong>X-Y plot</strong> has <strong>playheads</strong> which generate data events.
+                <ul>
+                    <li>Playheads are bound to <strong>instrumentalists</strong> via <strong>drag-and-drop whips</strong></li>
+                </ul>
+            </li>
+            <li>The <strong>Soloist</strong> generates... melody-adjacent... song information that takes a number of parameters into account:</li>
+                <ul>
+                    <li>The current chord from the composer</li>
+                    <li>The next chord from the composer</li>
+                    <li>The count of data events in the current chord (from lookahead from X-Y playhead)</li>
+                    <li>A linear regression of a lookahead of all of the data events in the current chord</li>
+
+                </ul>
+            </li>
+            <li>The <strong>Bassist</strong> generates uninspired basslines. It can also be associated with a playhead to use data events as rhythm inputs</li>
+            <li>The <strong>Drummer</strong> generates uninspired drums. Currently, it only takes "accent" inputs from the playheads.</li>
+        </ul>
         <div>
-            <button onclick="initAudio()">Initialize Audio Outputs</button>
+            <!--button onclick="initAudio()">Initialize Audio Outputs</button-->
+            <script>
+                function checkForInitialization(){
+                    if(typeof initAudio != "undefined"){
+                        initAudio();
+                    } else {
+                        window.setTimeout(checkForInitialization, 100);
+                    }
+                }
+                window.setTimeout(checkForInitialization, 100);
+            </script>
             <label style="margin-left: 15px;">
                 <input type="checkbox" id="midi-toggle" checked onchange="toggleMIDI(this.checked)">
                 MIDI Output
@@ -63,17 +111,18 @@
     </div>
 
     <!-- Control Components (Using new Pool/Tonic notation) -->
+    <!-- pools are e.g. 3♯, 2♯, 5♭, 0 --> 
     <sonofire-conductor
-        data-pool="3♯"
-        data-tonic="A"
-        data-tempo="120"
+        data-pool="3♭"
+        data-tonic="C"
+        data-tempo="90"
         data-mode="manual">
     </sonofire-conductor>
 
     <sonofire-composer
-        data-progression-style="jazz"
-        data-bars-per-chord="4"
-        data-progression-length="4"
+        data-progression-style="blues"
+        data-bars-per-chord="2"
+        data-progression-length="8"
         data-use-probabilistic="true">
     </sonofire-composer>
 
@@ -87,6 +136,25 @@
     <h1>Instrumentalists</h1>
     <sonofire-soloist
         data-channel="0"
+        id="soloist-1"
+        data-style="melodic"
+        data-note-range="mid"
+        data-max-interval="7"
+        data-enabled="true">
+    </sonofire-soloist>
+
+    <sonofire-soloist
+        data-channel="2"
+        id="soloist-2"
+        data-style="melodic"
+        data-note-range="mid"
+        data-max-interval="7"
+        data-enabled="true">
+    </sonofire-soloist>
+
+    <sonofire-soloist
+        data-channel="3"
+        id="soloist-3"
         data-style="melodic"
         data-note-range="mid"
         data-max-interval="7"
@@ -101,7 +169,7 @@
 
     <sonofire-bassist
         data-channel="1"
-        data-bass-style="walking"
+        data-bass-style="roots"
         data-note-range="mid-low"
         data-density="0.75"
         data-enabled="true">
@@ -150,6 +218,11 @@
         window.toggleWebAudio = (enabled) => {
             audioRouter.setWebAudioEnabled(enabled);
             updateStatus();
+        };
+
+        window.midiPanic = () => {
+            console.log('🚨 MIDI PANIC triggered by user');
+            audioRouter.panic();
         };
 
         // Subscribe to events for debugging

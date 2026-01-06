@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Music Theory Tests - Modal Harmonization</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 10px;
+        }
+        h2 {
+            color: #569cd6;
+            margin-top: 30px;
+        }
+        .test-suite {
+            background: #252526;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-left: 3px solid #007acc;
+        }
+        .test-result {
+            padding: 8px 12px;
+            margin: 5px 0;
+            font-family: monospace;
+            font-size: 13px;
+            border-radius: 3px;
+        }
+        .test-pass {
+            background: #1a4d2e;
+            color: #4ec9b0;
+            border-left: 3px solid #4ec9b0;
+        }
+        .test-fail {
+            background: #5a1e1e;
+            color: #f48771;
+            border-left: 3px solid #f48771;
+        }
+        .test-summary {
+            background: #2d2d2d;
+            padding: 15px;
+            margin-top: 20px;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .test-summary.all-pass {
+            border-left: 3px solid #4ec9b0;
+            color: #4ec9b0;
+        }
+        .test-summary.some-fail {
+            border-left: 3px solid #f48771;
+            color: #f48771;
+        }
+        .chord-progression {
+            background: #1e1e1e;
+            padding: 10px;
+            margin: 10px 0;
+            font-family: monospace;
+            border-radius: 3px;
+        }
+        code {
+            background: #1e1e1e;
+            padding: 2px 6px;
+            border-radius: 2px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎵 Music Theory Automated Tests</h1>
+    <p>Testing modal harmonization, chord quality generation, and pool/tonic notation</p>
+
+    <div id="test-results"></div>
+    <div id="test-summary"></div>
+
+    <script type="module">
+        import { getChordQualityForDegreeInPool, selectNextTonicByFunction } from '../lib/music_theory.js';
+        import { harmonicContext } from '../lib/harmonic_context.js';
+        import { SCALES } from '../lib/midi_data.js';
+
+        const results = [];
+        const resultsEl = document.getElementById('test-results');
+        const summaryEl = document.getElementById('test-summary');
+
+        function assert(condition, testName, details = '') {
+            const result = {
+                pass: condition,
+                name: testName,
+                details: details
+            };
+            results.push(result);
+
+            const div = document.createElement('div');
+            div.className = condition ? 'test-result test-pass' : 'test-result test-fail';
+            div.innerHTML = `${condition ? '✓' : '✗'} ${testName}${details ? '<br>&nbsp;&nbsp;&nbsp;&nbsp;' + details : ''}`;
+            resultsEl.appendChild(div);
+
+            if (!condition) {
+                console.error('TEST FAILED:', testName, details);
+            }
+        }
+
+        function assertEquals(actual, expected, testName) {
+            const pass = actual === expected;
+            assert(pass, testName, pass ? '' : `Expected: ${expected}, Got: ${actual}`);
+        }
+
+        function createTestSuite(title) {
+            const div = document.createElement('div');
+            div.className = 'test-suite';
+            div.innerHTML = `<h2>${title}</h2>`;
+            resultsEl.appendChild(div);
+            return div;
+        }
+
+        // ============================================================================
+        // TEST SUITE 1: Modal Harmonization - Individual Modes
+        // ============================================================================
+
+        createTestSuite('1. Modal Harmonization - Ionian (Major)');
+
+        // Ionian mode (C major): C D E F G A B
+        // Expected qualities: maj7, min7, min7, maj7, 7, min7, min7b5
+        assertEquals(getChordQualityForDegreeInPool(1, 'ionian'), 'maj7', 'Ionian I = maj7 (Cmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(2, 'ionian'), 'min7', 'Ionian II = min7 (Dm7)');
+        assertEquals(getChordQualityForDegreeInPool(3, 'ionian'), 'min7', 'Ionian III = min7 (Em7)');
+        assertEquals(getChordQualityForDegreeInPool(4, 'ionian'), 'maj7', 'Ionian IV = maj7 (Fmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(5, 'ionian'), '7', 'Ionian V = 7 (G7)');
+        assertEquals(getChordQualityForDegreeInPool(6, 'ionian'), 'min7', 'Ionian VI = min7 (Am7)');
+        assertEquals(getChordQualityForDegreeInPool(7, 'ionian'), 'min7b5', 'Ionian VII = min7b5 (Bm7b5)');
+
+        createTestSuite('2. Modal Harmonization - Dorian');
+
+        // Dorian mode (D dorian): D E F G A B C
+        // Expected qualities: min7, min7, maj7, 7, min7, min7b5, maj7
+        assertEquals(getChordQualityForDegreeInPool(1, 'dorian'), 'min7', 'Dorian I = min7 (Dm7)');
+        assertEquals(getChordQualityForDegreeInPool(2, 'dorian'), 'min7', 'Dorian II = min7 (Em7)');
+        assertEquals(getChordQualityForDegreeInPool(3, 'dorian'), 'maj7', 'Dorian III = maj7 (Fmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(4, 'dorian'), '7', 'Dorian IV = 7 (G7)');
+        assertEquals(getChordQualityForDegreeInPool(5, 'dorian'), 'min7', 'Dorian V = min7 (Am7)');
+        assertEquals(getChordQualityForDegreeInPool(6, 'dorian'), 'min7b5', 'Dorian VI = min7b5 (Bm7b5)');
+        assertEquals(getChordQualityForDegreeInPool(7, 'dorian'), 'maj7', 'Dorian VII = maj7 (Cmaj7)');
+
+        createTestSuite('3. Modal Harmonization - Phrygian');
+
+        // Phrygian mode (E phrygian): E F G A B C D
+        // Expected qualities: min7, maj7, 7, min7, min7b5, maj7, min7
+        assertEquals(getChordQualityForDegreeInPool(1, 'phrygian'), 'min7', 'Phrygian I = min7 (Em7)');
+        assertEquals(getChordQualityForDegreeInPool(2, 'phrygian'), 'maj7', 'Phrygian II = maj7 (Fmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(3, 'phrygian'), '7', 'Phrygian III = 7 (G7)');
+        assertEquals(getChordQualityForDegreeInPool(4, 'phrygian'), 'min7', 'Phrygian IV = min7 (Am7)');
+        assertEquals(getChordQualityForDegreeInPool(5, 'phrygian'), 'min7b5', 'Phrygian V = min7b5 (Bm7b5)');
+        assertEquals(getChordQualityForDegreeInPool(6, 'phrygian'), 'maj7', 'Phrygian VI = maj7 (Cmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(7, 'phrygian'), 'min7', 'Phrygian VII = min7 (Dm7)');
+
+        createTestSuite('4. Modal Harmonization - Lydian');
+
+        // Lydian mode (F lydian): F G A B C D E
+        // Expected qualities: maj7, 7, min7, min7b5, maj7, min7, min7
+        assertEquals(getChordQualityForDegreeInPool(1, 'lydian'), 'maj7', 'Lydian I = maj7 (Fmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(2, 'lydian'), '7', 'Lydian II = 7 (G7)');
+        assertEquals(getChordQualityForDegreeInPool(3, 'lydian'), 'min7', 'Lydian III = min7 (Am7)');
+        assertEquals(getChordQualityForDegreeInPool(4, 'lydian'), 'min7b5', 'Lydian IV = min7b5 (Bm7b5)');
+        assertEquals(getChordQualityForDegreeInPool(5, 'lydian'), 'maj7', 'Lydian V = maj7 (Cmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(6, 'lydian'), 'min7', 'Lydian VI = min7 (Dm7)');
+        assertEquals(getChordQualityForDegreeInPool(7, 'lydian'), 'min7', 'Lydian VII = min7 (Em7)');
+
+        createTestSuite('5. Modal Harmonization - Mixolydian');
+
+        // Mixolydian mode (G mixolydian): G A B C D E F
+        // Expected qualities: 7, min7, min7b5, maj7, min7, min7, maj7
+        assertEquals(getChordQualityForDegreeInPool(1, 'mixolydian'), '7', 'Mixolydian I = 7 (G7)');
+        assertEquals(getChordQualityForDegreeInPool(2, 'mixolydian'), 'min7', 'Mixolydian II = min7 (Am7)');
+        assertEquals(getChordQualityForDegreeInPool(3, 'mixolydian'), 'min7b5', 'Mixolydian III = min7b5 (Bm7b5)');
+        assertEquals(getChordQualityForDegreeInPool(4, 'mixolydian'), 'maj7', 'Mixolydian IV = maj7 (Cmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(5, 'mixolydian'), 'min7', 'Mixolydian V = min7 (Dm7)');
+        assertEquals(getChordQualityForDegreeInPool(6, 'mixolydian'), 'min7', 'Mixolydian VI = min7 (Em7)');
+        assertEquals(getChordQualityForDegreeInPool(7, 'mixolydian'), 'maj7', 'Mixolydian VII = maj7 (Fmaj7)');
+
+        createTestSuite('6. Modal Harmonization - Aeolian (Natural Minor)');
+
+        // Aeolian mode (A aeolian): A B C D E F G
+        // Expected qualities: min7, min7b5, maj7, min7, min7, maj7, 7
+        assertEquals(getChordQualityForDegreeInPool(1, 'aeolian'), 'min7', 'Aeolian I = min7 (Am7)');
+        assertEquals(getChordQualityForDegreeInPool(2, 'aeolian'), 'min7b5', 'Aeolian II = min7b5 (Bm7b5)');
+        assertEquals(getChordQualityForDegreeInPool(3, 'aeolian'), 'maj7', 'Aeolian III = maj7 (Cmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(4, 'aeolian'), 'min7', 'Aeolian IV = min7 (Dm7)');
+        assertEquals(getChordQualityForDegreeInPool(5, 'aeolian'), 'min7', 'Aeolian V = min7 (Em7)');
+        assertEquals(getChordQualityForDegreeInPool(6, 'aeolian'), 'maj7', 'Aeolian VI = maj7 (Fmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(7, 'aeolian'), '7', 'Aeolian VII = 7 (G7)');
+
+        createTestSuite('7. Modal Harmonization - Locrian');
+
+        // Locrian mode (B locrian): B C D E F G A
+        // Expected qualities: min7b5, maj7, min7, min7, maj7, 7, min7
+        assertEquals(getChordQualityForDegreeInPool(1, 'locrian'), 'min7b5', 'Locrian I = min7b5 (Bm7b5)');
+        assertEquals(getChordQualityForDegreeInPool(2, 'locrian'), 'maj7', 'Locrian II = maj7 (Cmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(3, 'locrian'), 'min7', 'Locrian III = min7 (Dm7)');
+        assertEquals(getChordQualityForDegreeInPool(4, 'locrian'), 'min7', 'Locrian IV = min7 (Em7)');
+        assertEquals(getChordQualityForDegreeInPool(5, 'locrian'), 'maj7', 'Locrian V = maj7 (Fmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(6, 'locrian'), '7', 'Locrian VI = 7 (G7)');
+        assertEquals(getChordQualityForDegreeInPool(7, 'locrian'), 'min7', 'Locrian VII = min7 (Am7)');
+
+        // ============================================================================
+        // TEST SUITE 8: Alias Support (major = ionian, minor = aeolian)
+        // ============================================================================
+
+        createTestSuite('8. Mode Aliases');
+
+        assertEquals(getChordQualityForDegreeInPool(1, 'major'), 'maj7', '"major" alias for Ionian I = maj7');
+        assertEquals(getChordQualityForDegreeInPool(5, 'major'), '7', '"major" alias for Ionian V = 7');
+        assertEquals(getChordQualityForDegreeInPool(1, 'minor'), 'min7', '"minor" alias for Aeolian I = min7');
+        assertEquals(getChordQualityForDegreeInPool(7, 'minor'), '7', '"minor" alias for Aeolian VII = 7');
+
+        // ============================================================================
+        // TEST SUITE 9: Pool/Tonic Mode Detection
+        // ============================================================================
+
+        createTestSuite('9. Pool/Tonic to Mode Detection');
+
+        // Pool 3♯ = [A B C♯ D E F♯ G♯] (A major scale)
+        // Degrees: A=1(Ionian), B=2(Dorian), C♯=3(Phrygian), D=4(Lydian),
+        //          E=5(Mixolydian), F♯=6(Aeolian), G♯=7(Locrian)
+
+        // Helper function to detect mode from pool/tonic
+        function detectMode(poolKey, tonicName) {
+            const pool = SCALES[poolKey];
+            const poolPitchClasses = [...new Set(pool.map(n => n % 12))];
+
+            const poolToMajorTonic = {
+                '0': 0, '1♯': 7, '2♯': 2, '3♯': 9, '4♯': 4, '5♯': 11, '6♯': 6,
+                '1♭': 5, '2♭': 10, '3♭': 3, '4♭': 8, '5♭': 1
+            };
+            const majorTonicPC = poolToMajorTonic[poolKey];
+
+            const orderedPitchClasses = [];
+            for (let i = 0; i < 7; i++) {
+                const pc = (majorTonicPC + [0, 2, 4, 5, 7, 9, 11][i]) % 12;
+                if (poolPitchClasses.includes(pc)) {
+                    orderedPitchClasses.push(pc);
+                }
+            }
+
+            const tonicNote = harmonicContext.noteNameToMIDI(tonicName, 4);
+            const tonicPitchClass = tonicNote % 12;
+            const degree = orderedPitchClasses.indexOf(tonicPitchClass);
+
+            const modeNames = ['ionian', 'dorian', 'phrygian', 'lydian', 'mixolydian', 'aeolian', 'locrian'];
+            return modeNames[degree] || 'ionian';
+        }
+
+        assertEquals(detectMode('3♯', 'A'), 'ionian', 'Pool 3♯/A = A Ionian (major)');
+        assertEquals(detectMode('3♯', 'B'), 'dorian', 'Pool 3♯/B = B Dorian');
+        assertEquals(detectMode('3♯', 'C♯'), 'phrygian', 'Pool 3♯/C♯ = C♯ Phrygian');
+        assertEquals(detectMode('3♯', 'D'), 'lydian', 'Pool 3♯/D = D Lydian');
+        assertEquals(detectMode('3♯', 'E'), 'mixolydian', 'Pool 3♯/E = E Mixolydian');
+        assertEquals(detectMode('3♯', 'F♯'), 'aeolian', 'Pool 3♯/F♯ = F♯ Aeolian (CRITICAL TEST)');
+        assertEquals(detectMode('3♯', 'G♯'), 'locrian', 'Pool 3♯/G♯ = G♯ Locrian');
+
+        // ============================================================================
+        // TEST SUITE 10: Integration Tests - Chord Progressions
+        // ============================================================================
+
+        createTestSuite('10. Integration Tests - Expected Chord Qualities');
+
+        // Test the specific bug that was fixed: 3♯/F♯ should produce F♯min7, not F♯maj7
+        const fSharpAeolianMode = detectMode('3♯', 'F♯');
+        const fSharpTonicChord = getChordQualityForDegreeInPool(1, fSharpAeolianMode);
+        assertEquals(fSharpTonicChord, 'min7', 'REGRESSION TEST: 3♯/F♯ tonic chord = min7 (not maj7)');
+
+        // Test A major (3♯/A) produces correct qualities
+        const aMajorMode = detectMode('3♯', 'A');
+        assertEquals(getChordQualityForDegreeInPool(1, aMajorMode), 'maj7', '3♯/A degree I = maj7 (Amaj7)');
+        assertEquals(getChordQualityForDegreeInPool(2, aMajorMode), 'min7', '3♯/A degree II = min7 (Bm7)');
+        assertEquals(getChordQualityForDegreeInPool(5, aMajorMode), '7', '3♯/A degree V = 7 (E7)');
+
+        // Test F♯ minor (3♯/F♯) produces correct qualities
+        const fSharpMinorMode = detectMode('3♯', 'F♯');
+        assertEquals(getChordQualityForDegreeInPool(1, fSharpMinorMode), 'min7', '3♯/F♯ degree I = min7 (F♯m7)');
+        assertEquals(getChordQualityForDegreeInPool(2, fSharpMinorMode), 'min7b5', '3♯/F♯ degree II = min7b5 (G♯m7b5)');
+        assertEquals(getChordQualityForDegreeInPool(3, fSharpMinorMode), 'maj7', '3♯/F♯ degree III = maj7 (Amaj7)');
+        assertEquals(getChordQualityForDegreeInPool(4, fSharpMinorMode), 'min7', '3♯/F♯ degree IV = min7 (Bm7)');
+
+        // Test C major (0/C) produces correct qualities
+        const cMajorMode = detectMode('0', 'C');
+        assertEquals(getChordQualityForDegreeInPool(1, cMajorMode), 'maj7', '0/C degree I = maj7 (Cmaj7)');
+        assertEquals(getChordQualityForDegreeInPool(6, cMajorMode), 'min7', '0/C degree VI = min7 (Am7)');
+
+        // Test A minor (0/A) produces correct qualities
+        const aMinorMode = detectMode('0', 'A');
+        assertEquals(getChordQualityForDegreeInPool(1, aMinorMode), 'min7', '0/A degree I = min7 (Am7)');
+        assertEquals(getChordQualityForDegreeInPool(3, aMinorMode), 'maj7', '0/A degree III = maj7 (Cmaj7)');
+
+        // ============================================================================
+        // TEST SUITE 11: Edge Cases
+        // ============================================================================
+
+        createTestSuite('11. Edge Cases');
+
+        // Invalid degree should return default
+        assertEquals(getChordQualityForDegreeInPool(0, 'ionian'), 'maj7', 'Degree 0 returns default maj7');
+        assertEquals(getChordQualityForDegreeInPool(8, 'ionian'), 'maj7', 'Degree 8 returns default maj7');
+        assertEquals(getChordQualityForDegreeInPool(-1, 'ionian'), 'maj7', 'Degree -1 returns default maj7');
+
+        // Invalid mode should default to ionian
+        assertEquals(getChordQualityForDegreeInPool(1, 'invalid-mode'), 'maj7', 'Invalid mode defaults to Ionian I = maj7');
+        assertEquals(getChordQualityForDegreeInPool(5, 'invalid-mode'), '7', 'Invalid mode defaults to Ionian V = 7');
+
+        // Case insensitivity
+        assertEquals(getChordQualityForDegreeInPool(1, 'AEOLIAN'), 'min7', 'Uppercase "AEOLIAN" works');
+        assertEquals(getChordQualityForDegreeInPool(1, 'DoRiAn'), 'min7', 'Mixed case "DoRiAn" works');
+
+        // ============================================================================
+        // SUMMARY
+        // ============================================================================
+
+        const passCount = results.filter(r => r.pass).length;
+        const failCount = results.filter(r => !r.pass).length;
+        const totalCount = results.length;
+
+        summaryEl.className = failCount === 0 ? 'test-summary all-pass' : 'test-summary some-fail';
+        summaryEl.innerHTML = `
+            <div>Test Summary: ${passCount}/${totalCount} tests passed</div>
+            ${failCount > 0 ? `<div style="margin-top: 10px;">❌ ${failCount} test(s) failed - see console for details</div>` : '<div style="margin-top: 10px;">✓ All tests passed!</div>'}
+        `;
+
+        if (failCount === 0) {
+            console.log('%c✓ ALL TESTS PASSED', 'color: #4ec9b0; font-size: 16px; font-weight: bold;');
+        } else {
+            console.error('%c✗ SOME TESTS FAILED', 'color: #f48771; font-size: 16px; font-weight: bold;');
+        }
+    </script>
+</body>
+</html>

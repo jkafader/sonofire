@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Test FM Synthesis</title>
+</head>
+<body>
+    <h1>FM Synthesis Test</h1>
+    <button id="test-glockenspiel">Test Glockenspiel (Channel 0 - Active)</button>
+    <button id="test-xylophone">Test Xylophone (Channel 0 - Alt)</button>
+    <button id="test-flute">Test Flute (Channel 0 - Alt)</button>
+    <button id="test-bell">Test Bell (Channel 0 - Alt)</button>
+    <button id="test-bass">Test Bass (Channel 1)</button>
+    <button id="test-default">Test Default (Channel 2)</button>
+    <button id="test-velocity">Test Velocity Response</button>
+    <button id="test-panic">Panic (Stop All)</button>
+
+    <script type="module">
+        import { webAudioSynth } from './lib/web_audio_synth.js';
+
+        // Initialize on first user interaction
+        document.body.addEventListener('click', () => {
+            if (!webAudioSynth.initialized) {
+                webAudioSynth.initialize();
+            }
+        }, { once: true });
+
+        // Test glockenspiel (Channel 0 - currently active)
+        document.getElementById('test-glockenspiel').onclick = () => {
+            webAudioSynth.playNote(0, 79, 100); // G5, forte (typical glockenspiel range)
+        };
+
+        // Test xylophone (Channel 0 - alternative, needs code change)
+        document.getElementById('test-xylophone').onclick = () => {
+            // This will play glockenspiel unless you uncomment xylophone in web_audio_synth.js
+            webAudioSynth.playNote(0, 72, 100); // C5, forte
+        };
+
+        // Test flute (Channel 0 - alternative, needs code change)
+        document.getElementById('test-flute').onclick = () => {
+            // This will play glockenspiel unless you uncomment flute in web_audio_synth.js
+            webAudioSynth.playNote(0, 65, 100); // F4, forte
+        };
+
+        // Test bell (Channel 0 - alternative, needs code change)
+        document.getElementById('test-bell').onclick = () => {
+            // This will play glockenspiel unless you uncomment bell in web_audio_synth.js
+            webAudioSynth.playNote(0, 69, 100); // A4, forte
+        };
+
+        // Test bass (Channel 1)
+        document.getElementById('test-bass').onclick = () => {
+            webAudioSynth.playNote(1, 45, 100); // A2, forte
+            setTimeout(() => webAudioSynth.stopNote(1, 45), 1000);
+        };
+
+        // Test default (Channel 2)
+        document.getElementById('test-default').onclick = () => {
+            webAudioSynth.playNote(2, 60, 100); // C4, forte
+            setTimeout(() => webAudioSynth.stopNote(2, 60), 1000);
+        };
+
+        // Test velocity response (with glockenspiel)
+        document.getElementById('test-velocity').onclick = () => {
+            // Play glockenspiel at different velocities
+            webAudioSynth.playNote(0, 76, 40);  // Piano (E5)
+            setTimeout(() => {
+                webAudioSynth.playNote(0, 79, 80);  // Mezzo-forte (G5)
+            }, 800);
+            setTimeout(() => {
+                webAudioSynth.playNote(0, 84, 120); // Fortissimo (C6)
+            }, 1600);
+        };
+
+        // Panic button
+        document.getElementById('test-panic').onclick = () => {
+            webAudioSynth.panic();
+        };
+    </script>
+</body>
+</html>

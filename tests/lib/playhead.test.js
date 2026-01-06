@@ -55,14 +55,28 @@ describe('Playhead', () => {
 
     describe('Speed Multipliers', () => {
         it('should have correct speed multiplier values', () => {
-            expect(Playhead.SPEED_MULTIPLIERS).toHaveLength(13);
+            expect(Playhead.SPEED_MULTIPLIERS).toHaveLength(15);
 
-            // Check some key values
+            // Check all key values
             const speedValues = Playhead.SPEED_MULTIPLIERS.map(s => s.value);
+
+            // Division speeds
+            expect(speedValues).toContain(1/48);  // ÷48
+            expect(speedValues).toContain(1/24);  // ÷24
             expect(speedValues).toContain(1/16);  // ÷16
+            expect(speedValues).toContain(1/12);  // ÷12
+            expect(speedValues).toContain(1/8);   // ÷8
+            expect(speedValues).toContain(1/4);   // ÷4
+            expect(speedValues).toContain(1/3);   // ÷3
             expect(speedValues).toContain(1/2);   // ÷2
+
+            // Base and multiplication speeds
             expect(speedValues).toContain(1);     // ×1
             expect(speedValues).toContain(2);     // ×2
+            expect(speedValues).toContain(3);     // ×3
+            expect(speedValues).toContain(4);     // ×4
+            expect(speedValues).toContain(8);     // ×8
+            expect(speedValues).toContain(12);    // ×12
             expect(speedValues).toContain(16);    // ×16
         });
     });

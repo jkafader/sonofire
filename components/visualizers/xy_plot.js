@@ -222,6 +222,138 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
     }
 
     /**
+     * Get lookahead data window for phrase planning
+     * @param {Playhead} playhead - The playhead to look ahead from
+     * @param {number} ticksAhead - How many ticks to look ahead
+     * @returns {Array} Array of upcoming data points
+     */
+    getLookaheadData(playhead, ticksAhead) {
+        if (!this.data || this.data.length === 0) {
+            return [];
+        }
+
+        const currentPos = playhead.position;
+        const speed = playhead.speed;
+        const ticksPerPixel = 1.0 / speed; // How many ticks to advance 1 pixel
+        const pixelsAhead = ticksAhead / ticksPerPixel;
+        const endPos = currentPos + pixelsAhead;
+
+        // Get SVG scales for coordinate conversion
+        const svg = d3.select(this.$('#my_dataviz svg'));
+        if (!svg.node()) return [];
+
+        const parent = svg.select('g');
+        const upcomingPoints = [];
+        const height = this.height; // Capture height before D3 loop
+
+        // Find all circles between current position and end position
+        parent.selectAll('circle').each(function() {
+            const circle = d3.select(this);
+            const cx = parseFloat(circle.attr('cx'));
+            const cy = parseFloat(circle.attr('cy'));
+
+            if (!isNaN(cx) && !isNaN(cy) && cx >= currentPos && cx <= endPos) {
+                upcomingPoints.push({
+                    x: cx,
+                    y: cy,
+                    normalizedValue: 1.0 - (cy / height) // Invert because SVG Y increases downward
+                });
+            }
+        });
+
+        console.log(`XY Plot: Found ${upcomingPoints.length} data points in lookahead window (${currentPos.toFixed(0)} to ${endPos.toFixed(0)})`);
+
+        return upcomingPoints;
+    }
+
+    /**
+     * Calculate linear regression trend for lookahead data
+     * @param {Array} dataPoints - Array of {x, y, normalizedValue} objects
+     * @returns {Object} { slope, direction, confidence }
+     */
+    calculateDataTrend(dataPoints) {
+        if (dataPoints.length < 2) {
+            return { slope: 0, direction: 'flat', confidence: 0 };
+        }
+
+        // Simple linear regression: y = mx + b
+        const n = dataPoints.length;
+        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+
+        dataPoints.forEach((point, i) => {
+            sumX += i;
+            sumY += point.normalizedValue;
+            sumXY += i * point.normalizedValue;
+            sumX2 += i * i;
+        });
+
+        const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+        const direction = slope > 0.05 ? 'rising' : slope < -0.05 ? 'falling' : 'flat';
+        const confidence = Math.min(Math.abs(slope) * 2, 1.0);
+
+        return { slope, direction, confidence };
+    }
+
+    /**
+     * Setup subscriptions including chord change for lookahead
+     */
+    setupSubscriptions() {
+        super.setupSubscriptions();
+
+        // Subscribe to chord changes to publish lookahead data
+        this.subscribe('music:chord', (chordData) => {
+            this.handleChordChangeForLookahead(chordData);
+        });
+    }
+
+    /**
+     * Handle chord change by publishing lookahead data for each playhead
+     */
+    handleChordChangeForLookahead(chordData) {
+        // Wait a moment for music:nextChord to be published
+        setTimeout(() => {
+            const nextChordInfo = this.getLastValue('music:nextChord');
+            if (!nextChordInfo) {
+                console.log('XY Plot: No next chord info available for lookahead');
+                return;
+            }
+
+            // For each active playhead, publish lookahead data
+            this.playheads.forEach((playhead, index) => {
+                if (!playhead.enabled) return;
+
+                const lookaheadData = this.getLookaheadData(playhead, nextChordInfo.ticksUntilChange);
+                const trend = this.calculateDataTrend(lookaheadData);
+
+                const payload = {
+                    visualizerId: this.getVisualizerId(),
+                    playheadId: playhead.id,
+                    dataPoints: lookaheadData,
+                    trend: trend,
+                    estimatedEventCount: lookaheadData.length,
+                    ticksUntilChord: nextChordInfo.ticksUntilChange
+                };
+
+                // Publish per-playhead lookahead topic
+                const topic = `data:lookahead:${playhead.id}`;
+                this.publish(topic, payload);
+
+                // Also publish to general topic for first playhead (backward compatibility)
+                if (index === 0) {
+                    this.publish('data:lookahead', payload);
+                }
+
+                console.log(`XY Plot: Published lookahead for playhead ${playhead.id}:`, {
+                    eventCount: lookaheadData.length,
+                    trend: trend.direction,
+                    slope: trend.slope.toFixed(3),
+                    topics: index === 0 ? ['data:lookahead', topic] : [topic]
+                });
+            });
+        }, 100); // Wait 100ms for next chord to be published
+    }
+
+    /**
      * Render all playheads with source lights
      */
     renderPlayheads() {

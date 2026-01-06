@@ -347,6 +347,48 @@ export class SonofireComposer extends SonofireBase {
         });
 
         console.log(`Composer: Publishing chord ${this.currentChord.symbol} (${voicing.join(', ')})`);
+
+        // Also publish next chord for phrase planning
+        this.publishNextChord();
+    }
+
+    /**
+     * Calculate ticks until next chord change
+     * @returns {number} Ticks remaining until next chord
+     */
+    calculateTicksUntilNextChord() {
+        const ppqn = 24; // From MIDI clock
+        const ticksPerBar = ppqn * 4; // 4/4 time
+        const ticksPerChord = ticksPerBar * this.barsPerChord;
+        const currentTick = this.getLastValue('clock:tick')?.tick || 0;
+        const ticksIntoCurrentChord = currentTick % ticksPerChord;
+        return ticksPerChord - ticksIntoCurrentChord;
+    }
+
+    /**
+     * Publish next chord information for phrase planning
+     */
+    publishNextChord() {
+        if (this.progression.length === 0) {
+            return;
+        }
+
+        const nextIndex = (this.progressionIndex + 1) % this.progression.length;
+        const nextChord = this.progression[nextIndex];
+        const nextVoicing = voiceChord(nextChord, this.voicingType);
+
+        this.publish('music:nextChord', {
+            chord: nextChord.symbol,
+            root: nextChord.root,
+            quality: nextChord.quality,
+            voicing: nextVoicing,
+            poolKey: nextChord.poolKey || this.poolKey,
+            tonicNote: nextChord.root,
+            scaleDegree: nextChord.degree,
+            ticksUntilChange: this.calculateTicksUntilNextChord()
+        });
+
+        console.log(`Composer: Next chord will be ${nextChord.symbol} in ${this.calculateTicksUntilNextChord()} ticks`);
     }
 
     /**
