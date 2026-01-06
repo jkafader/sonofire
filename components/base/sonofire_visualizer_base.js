@@ -1,19 +1,17 @@
 import { SonofireBase } from './sonofire_base.js';
+import { PlayheadsMixin } from '../../lib/mixins/playheads.js';
 import { SCALES, SCALE_TONES } from '../../lib/midi_data.js';
-import { Playhead } from '../../lib/playhead.js';
 
 /**
- * Base class for all Sonofire visualizer components
- * Provides common functionality for data loading, visualization, and playback
+ * Core visualizer class (before mixin application)
+ * Provides common functionality for data loading and visualization
  */
-export class SonofireVisualizerBase extends SonofireBase {
+class SonofireVisualizerBaseCore extends SonofireBase {
     constructor() {
         super();
 
         // Visualization state
         this.data = [];
-        this.playheads = [];  // Array of Playhead objects
-        this.playheadPosition = 0;  // Legacy single playhead position (deprecated)
         this.svg = null;
         this.dataBoundaries = []; // Maps data regions/values to MIDI notes
 
@@ -70,36 +68,8 @@ export class SonofireVisualizerBase extends SonofireBase {
     setupSubscriptions() {
         super.setupSubscriptions();
 
-        // Subscribe to clock ticks for playhead advancement
-        this.subscribe('clock:tick', (data) => {
-            if (this.isPlaying) {
-                this.onClockTick(data);
-            }
-        });
-
-        // Subscribe to pool changes to update scale
-        this.subscribe('context:pool', (data) => {
-            this.onPoolChange(data);
-        });
-
-        // Subscribe to transport controls from Conductor
-        this.subscribe('transport:play', (data) => {
-            this.isPlaying = true;
-            console.log(`${this.constructor.name}: Playing`);
-            this.render();
-        });
-
-        this.subscribe('transport:stop', (data) => {
-            this.isPlaying = false;
-            console.log(`${this.constructor.name}: Stopped`);
-            this.render();
-        });
-
-        this.subscribe('transport:rewind', (data) => {
-            this.rewind();
-            console.log(`${this.constructor.name}: Rewound to 0`);
-            this.render();
-        });
+        // Setup playhead-related subscriptions (from mixin)
+        this.setupPlayheadSubscriptions();
     }
 
     /**
@@ -114,81 +84,36 @@ export class SonofireVisualizerBase extends SonofireBase {
             this.onPoolChange(poolContext);
         }
 
-        // Restore playheads from PubSub
+        // Restore playheads from PubSub (from mixin)
         this.restorePlayheads();
+
+        // Render playhead controls UI (from mixin)
+        this.renderPlayheadControls();
+    }
+
+    // ========================================
+    // Playhead Hooks (Required by Mixin)
+    // ========================================
+
+    /**
+     * Advance a specific playhead's position in visualizer space
+     * Subclasses MUST override to implement playhead movement
+     * @param {Playhead} playhead
+     */
+    advancePlayheadPosition(playhead) {
+        // Subclasses must implement (e.g., increment X position in XY plot)
+        throw new Error('advancePlayheadPosition() must be implemented by subclass');
     }
 
     /**
-     * Get unique visualizer ID for playhead management
-     * @returns {string}
+     * Sample data at a playhead's current position
+     * Subclasses MUST override to implement data sampling
+     * @param {Playhead} playhead
      */
-    getVisualizerId() {
-        return this.id || this.tagName.toLowerCase();
-    }
-
-    /**
-     * Add a new playhead
-     * @param {Object} config - Playhead configuration
-     * @returns {Playhead}
-     */
-    addPlayhead(config = {}) {
-        const visualizerId = this.getVisualizerId();
-        const playhead = new Playhead(visualizerId, config);
-
-        this.playheads.push(playhead);
-        this.savePlayheads();
-        this.render();
-
-        console.log(`${this.constructor.name}: Added playhead ${playhead.id}`);
-        return playhead;
-    }
-
-    /**
-     * Remove a playhead by ID
-     * @param {string} playheadId
-     */
-    removePlayhead(playheadId) {
-        this.playheads = this.playheads.filter(ph => ph.id !== playheadId);
-        this.savePlayheads();
-        this.render();
-
-        console.log(`${this.constructor.name}: Removed playhead ${playheadId}`);
-
-        // Publish event so WhipManager can clean up bindings
-        this.publish('playhead:removed', { visualizerId: this.getVisualizerId(), playheadId });
-    }
-
-    /**
-     * Get a playhead by ID
-     * @param {string} playheadId
-     * @returns {Playhead|null}
-     */
-    getPlayhead(playheadId) {
-        return this.playheads.find(ph => ph.id === playheadId) || null;
-    }
-
-    /**
-     * Advance all enabled playheads
-     */
-    advanceAllPlayheads() {
-        let anyAdvanced = false;
-        this.playheads.forEach(playhead => {
-            const advanceCount = playhead.advance();
-            if (advanceCount > 0) {
-                // Playhead advanced, update position and sample data
-                // For speeds > 1, advance multiple times
-                for (let i = 0; i < advanceCount; i++) {
-                    this.advancePlayheadPosition(playhead);
-                    this.sampleDataAtPlayhead(playhead);
-                }
-                anyAdvanced = true;
-            }
-        });
-
-        // Call hook if any playheads advanced
-        if (anyAdvanced) {
-            this.onPlayheadsAdvanced();
-        }
+    sampleDataAtPlayhead(playhead) {
+        // Subclasses must implement
+        // Should call playhead.sampleValue(rawValue, normalizedValue)
+        throw new Error('sampleDataAtPlayhead() must be implemented by subclass');
     }
 
     /**
@@ -196,71 +121,55 @@ export class SonofireVisualizerBase extends SonofireBase {
      * Subclasses can override to update visuals
      */
     onPlayheadsAdvanced() {
-        // Subclasses implement
+        // Optional override - default is no-op
+        // Subclasses can override to update their visual rendering
     }
 
     /**
-     * Advance a specific playhead's position in visualizer space
-     * Subclasses should override to implement playhead movement
-     * @param {Playhead} playhead
-     */
-    advancePlayheadPosition(playhead) {
-        // Subclasses implement (e.g., increment X position in XY plot)
-    }
-
-    /**
-     * Sample data at a playhead's current position
-     * Subclasses should override to implement data sampling
-     * @param {Playhead} playhead
-     */
-    sampleDataAtPlayhead(playhead) {
-        // Subclasses implement
-        // Should call playhead.sampleValue(rawValue, normalizedValue)
-    }
-
-    /**
-     * Save playheads to PubSub for persistence
-     */
-    savePlayheads() {
-        const topic = `playheads:${this.getVisualizerId()}`;
-        const state = {
-            visualizerId: this.getVisualizerId(),
-            playheads: this.playheads.map(ph => ph.toJSON())
-        };
-        this.publish(topic, state);
-    }
-
-    /**
-     * Restore playheads from PubSub
-     */
-    restorePlayheads() {
-        const topic = `playheads:${this.getVisualizerId()}`;
-        const state = this.getLastValue(topic);
-
-        if (state && state.playheads) {
-            this.playheads = state.playheads.map(data =>
-                Playhead.fromJSON(data, this.getVisualizerId())
-            );
-            console.log(`${this.constructor.name}: Restored ${this.playheads.length} playheads from state`);
-        }
-    }
-
-    /**
-     * Handle clock tick - advance playhead and emit events
-     */
-    onClockTick(clockData) {
-        // Advance all playheads (based on individual clock ticks)
-        this.advanceAllPlayheads();
-    }
-
-    /**
-     * Handle key change from Conductor
+     * Handle pool/tonic change from Conductor
+     * Override from mixin to add visualizer-specific behavior
      */
     onPoolChange(poolData) {
         console.log('Visualizer: Pool changed to', poolData.poolKey, '/', poolData.tonicName);
-        // Could update scale visualization or note mapping
-        // For now, we'll let components use their configured scale
+        // Subclasses can override to update scale visualization or note mapping
     }
+
+    // ========================================
+    // Transport Controls (Override Mixin)
+    // ========================================
+
+    /**
+     * Start playback - override to add rendering
+     */
+    play() {
+        super.play(); // Call mixin's play()
+        this.isPlaying = true;
+        this.render();
+        console.log(`${this.constructor.name}: Playing`);
+    }
+
+    /**
+     * Stop playback - override to add rendering
+     */
+    stop() {
+        super.stop(); // Call mixin's stop()
+        this.isPlaying = false;
+        this.render();
+        console.log(`${this.constructor.name}: Stopped`);
+    }
+
+    /**
+     * Rewind all playheads - override to add rendering
+     */
+    rewind() {
+        super.rewind(); // Call mixin's rewind()
+        this.render();
+        console.log(`${this.constructor.name}: Rewound to 0`);
+    }
+
+    // ========================================
+    // Visualization Methods
+    // ========================================
 
     /**
      * Calculate scale partitions (map data ranges to MIDI notes)
@@ -315,16 +224,6 @@ export class SonofireVisualizerBase extends SonofireBase {
     }
 
     /**
-     * Advance playhead position
-     * Subclasses should override based on their playhead type
-     * @returns {boolean} True if playhead advanced, false if not (e.g., waiting for clock divisions)
-     */
-    advancePlayhead() {
-        // Subclasses implement
-        return false;
-    }
-
-    /**
      * Highlight currently active data points
      * Subclasses should override
      */
@@ -340,15 +239,6 @@ export class SonofireVisualizerBase extends SonofireBase {
     getActiveDataPoints() {
         // Subclasses implement
         return [];
-    }
-
-    /**
-     * Rewind playhead to beginning
-     * Subclasses can override to reset specific state
-     */
-    rewind() {
-        this.playheadPosition = 0;
-        // Subclasses override to reset their specific playhead state
     }
 
     /**
@@ -369,39 +259,14 @@ export class SonofireVisualizerBase extends SonofireBase {
             });
         });
     }
-
-    /**
-     * Start playback
-     */
-    play() {
-        this.isPlaying = true;
-        this.publish('visualizer:play', { source: this.tagName.toLowerCase() });
-        console.log('Visualizer playback started');
-    }
-
-    /**
-     * Stop playback
-     */
-    stop() {
-        this.isPlaying = false;
-        this.publish('visualizer:stop', { source: this.tagName.toLowerCase() });
-        console.log('Visualizer playback stopped');
-    }
-
-    /**
-     * Rewind all playheads to beginning
-     */
-    rewind() {
-        this.playheadPosition = 0;
-
-        // Reset all playheads
-        this.playheads.forEach(playhead => {
-            playhead.setPosition(0);
-            playhead.tickCounter = 0;
-        });
-
-        this.savePlayheads();
-        this.publish('visualizer:rewind', { source: this.tagName.toLowerCase() });
-        console.log('Visualizer rewound');
-    }
 }
+
+/**
+ * SonofireVisualizerBase - Base class for all visualizer components
+ * Combines SonofireBase with PlayheadsMixin to provide:
+ * - Data loading and visualization
+ * - Playhead management and advancement
+ * - Transport controls
+ * - Musical scale mapping
+ */
+export const SonofireVisualizerBase = PlayheadsMixin(SonofireVisualizerBaseCore);

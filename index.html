@@ -126,11 +126,8 @@
         data-use-probabilistic="true">
     </sonofire-composer>
 
-    <!-- Visualizer -->
+    <!-- Visualizer (now includes built-in playhead management) -->
     <sonofire-xy-plot id="main-xy-plot" width="720" height="300"></sonofire-xy-plot>
-
-    <!-- Playhead Manager -->
-    <sonofire-playhead-manager data-visualizer-id="main-xy-plot"></sonofire-playhead-manager>
 
     <!-- Instrumentalists -->
     <h1>Instrumentalists</h1>
@@ -183,7 +180,6 @@
         import './components/controllers/conductor.js';
         import './components/controllers/composer.js';
         import './components/visualizers/xy_plot.js';
-        import './components/ui/playhead_manager.js';
         import './components/instrumentalists/soloist.js';
         import './components/instrumentalists/drummer.js';
         import './components/instrumentalists/bassist.js';

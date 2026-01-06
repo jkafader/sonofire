@@ -18,17 +18,6 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
     async render() {
         // Create container
         this.innerHTML = `
-            <div id="sonofire-xy-controls" style="background: #2d2d2d; padding: 15px; margin: 10px 0; border-left: 3px solid #4ec9b0;">
-                <div style="margin-bottom: 10px;">
-                    <strong style="color: #4ec9b0;">📊 XY Plot</strong>
-                    <span style="margin-left: 15px; color: #888;">
-                        Status: ${this.isPlaying ? '▶ Playing' : '⏸ Stopped'}
-                    </span>
-                    <span style="margin-left: 15px; color: #888; font-size: 0.9em;">
-                        (Use Conductor transport controls to play/stop/rewind)
-                    </span>
-                </div>
-            </div>
             <div id="my_dataviz"></div>
         `;
 
@@ -218,6 +207,13 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
      * Override: Called after playheads advance
      */
     onPlayheadsAdvanced() {
+        this.renderPlayheads();
+    }
+
+    /**
+     * Override: Called when playhead list changes (add/remove/toggle)
+     */
+    onPlayheadListChanged() {
         this.renderPlayheads();
     }
 
