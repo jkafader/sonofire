@@ -261,9 +261,10 @@
             updateStatus();
         };
 
-        window.midiPanic = () => {
+        window.midiPanic = async () => {
             console.log('🚨 MIDI PANIC triggered by user');
-            audioRouter.panic();
+            await audioRouter.panic();
+            console.log('🚨 MIDI PANIC completed');
         };
 
         // Subscribe to events for debugging
