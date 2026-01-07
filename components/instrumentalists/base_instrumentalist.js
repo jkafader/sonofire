@@ -19,7 +19,7 @@ export class BaseInstrumentalist extends SonofireBase {
         this.currentScale = [];     // Current scale notes
         this.currentKey = 'C';      // Current key name
         this.mood = 'relaxed';      // Current mood from Conductor
-        this.spareness = 0.5;       // Current spareness (0.0-1.0)
+        this.density = 0.5;         // Current density (0.0-1.0)
 
         // Pool/tonic notation
         this.poolKey = null;
@@ -72,8 +72,8 @@ export class BaseInstrumentalist extends SonofireBase {
             this.mood = data.mood;
         });
 
-        this.subscribe('context:spareness', (data) => {
-            this.spareness = data.spareness;
+        this.subscribe('context:density', (data) => {
+            this.density = data.density;
         });
 
         /*this.subscribe('context:key', (data) => {
@@ -141,11 +141,11 @@ export class BaseInstrumentalist extends SonofireBase {
             console.log(`${this.constructor.name}: Found mood ${this.mood}`);
         }
 
-        // Discover spareness
-        const sparenessContext = this.getLastValue('context:spareness');
-        if (sparenessContext) {
-            this.spareness = sparenessContext.spareness;
-            console.log(`${this.constructor.name}: Found spareness ${this.spareness.toFixed(2)}`);
+        // Discover density
+        const densityContext = this.getLastValue('context:density');
+        if (densityContext) {
+            this.density = densityContext.density;
+            console.log(`${this.constructor.name}: Found density ${this.density.toFixed(2)}`);
         }
     }
 

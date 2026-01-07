@@ -594,7 +594,7 @@ export class SonofireSoloist extends BaseInstrumentalist {
             note = Math.max(this.minNote, Math.min(this.maxNote, note));
 
             const velocity = this.nextNoteVelocity || 80;
-            const duration = 300 * (1 + this.spareness);
+            const duration = 300 * (2 - this.density);
 
             this.sendNote(note, velocity, duration);
             this.lastNote = note;
@@ -683,7 +683,7 @@ export class SonofireSoloist extends BaseInstrumentalist {
             // Determine velocity based on mood and data intensity
             const velocity = this.calculateVelocity(data);
 
-            // Determine duration based on spareness
+            // Determine duration based on density
             const duration = this.calculateDuration();
 
             // Send the note
@@ -790,14 +790,14 @@ export class SonofireSoloist extends BaseInstrumentalist {
     }
 
     /**
-     * Calculate duration based on spareness
+     * Calculate duration based on density
      * @returns {number} Duration in milliseconds
      */
     calculateDuration() {
-        // More sparse = longer notes
+        // Higher density = shorter notes
         const baseDuration = 200;
-        const sparenessMultiplier = 1 + (this.spareness * 2); // 1.0 to 3.0
-        const duration = baseDuration * sparenessMultiplier;
+        const densityMultiplier = 3 - (this.density * 2); // 3.0 to 1.0
+        const duration = baseDuration * densityMultiplier;
 
         return Math.floor(duration);
     }

@@ -2,20 +2,31 @@ import 'https://unpkg.com/d3@7.9.0';
 import { SonofireVisualizerBase } from '../base/sonofire_visualizer_base.js';
 import { MIDI_NOTES_FLAT, MIDI_NOTES_SHARP } from '../../lib/midi_data.js';
 import { WhipDragHandler } from '../../lib/whip_drag_handler.js';
+import { PLAYHEAD_SIDEBAR_WIDTH } from '../../lib/mixins/playheads.js';
 
 /**
  * XY Plot Visualizer - Refactored from pitch_generator.js
  * Displays time-series data as scatter plot with musical playback
  */
 export class SonofireXYPlot extends SonofireVisualizerBase {
+    // Number of ticks to sweep full width at 1x speed
+    // At 24 PPQN and 90 BPM, 960 ticks = 40 beats = ~27 seconds
+    static TICKS_PER_FULL_SWEEP = 960;
+
     constructor() {
         super();
+
+        // Track recently sampled data indices per playhead to avoid re-sampling
+        this.recentlySampledIndices = new Map(); // playheadId -> Set of indices
     }
 
     /**
      * Render the component
      */
     async render() {
+        // Detect container dimensions before rendering
+        this.detectContainerDimensions();
+
         // Create container
         this.innerHTML = `
             <div id="my_dataviz"></div>
@@ -23,6 +34,42 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
 
         // Render graph
         await this.renderGraph();
+    }
+
+    /**
+     * Detect and set dimensions based on parent container
+     * Only sets dimensions if they haven't been explicitly set via attributes
+     */
+    detectContainerDimensions() {
+        const parentElement = this.parentElement;
+        if (!parentElement) return;
+
+        // Check if dimensions were explicitly set via attributes
+        const hasExplicitWidth = this.getAttribute('width');
+        const hasExplicitHeight = this.getAttribute('height');
+
+        // Get computed dimensions of parent (excluding padding)
+        const parentStyle = window.getComputedStyle(parentElement);
+        const parentWidth = parentElement.clientWidth -
+            parseFloat(parentStyle.paddingLeft) -
+            parseFloat(parentStyle.paddingRight);
+        const parentHeight = parentElement.clientHeight -
+            parseFloat(parentStyle.paddingTop) -
+            parseFloat(parentStyle.paddingBottom);
+
+        // Only use parent dimensions if not explicitly set and available
+        if (!hasExplicitWidth && parentWidth > 0) {
+            // Subtract playhead sidebar width (imported from PlayheadsMixin)
+            this.width = parentWidth - PLAYHEAD_SIDEBAR_WIDTH - 20; // Leave some margin
+        }
+        if (!hasExplicitHeight) {
+            if (parentHeight > 0 && parentHeight > 200) {
+                this.height = parentHeight - 20;
+            } else {
+                // Default height if parent has no explicit height
+                this.height = 400;
+            }
+        }
     }
 
     /**
@@ -70,6 +117,10 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
             ])
             .range([0, this.width]);
 
+        // Store scales for data sampling
+        this.xScale = x;
+        this.xDomain = x.domain();
+
         svg.append('g')
             .attr('transform', `translate(0,${this.height})`)
             .call(d3.axisBottom(x));
@@ -78,6 +129,8 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         const y = d3.scaleLinear()
             .domain([50, 250])
             .range([this.height, 0]);
+
+        this.yScale = y;
 
         svg.append('g')
             .call(d3.axisLeft(y));
@@ -109,6 +162,13 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         const getX = (d) => new Date(d[this.xColumn]);
         const getY = (d) => d[this.yColumn];
 
+        // Store data accessors for sampling
+        this.getX = getX;
+        this.getY = getY;
+
+        // Clear recently sampled tracking when data reloads
+        this.recentlySampledIndices.clear();
+
         // Plot data points
         svg.append('g')
             .selectAll('dot')
@@ -138,68 +198,121 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
 
 
     /**
-     * Override: Advance a specific playhead's position
+     * Override: Advance a specific playhead's position (percentage-based)
+     * Position advances as a constant percentage per tick, independent of pixel width.
+     * This ensures consistent playback speed regardless of visualization size.
      * @param {Playhead} playhead
      */
     advancePlayheadPosition(playhead) {
-        // Advance X position by 1 pixel
-        playhead.setPosition(playhead.position + 1);
+        // Calculate percentage increment based on fixed sweep time
+        // At 1x speed, playhead takes TICKS_PER_FULL_SWEEP ticks to traverse 0-1
+        const increment = 1.0 / SonofireXYPlot.TICKS_PER_FULL_SWEEP;
+
+        // Advance position as percentage (0-1)
+        playhead.setPosition(playhead.position + increment);
 
         // Loop back to start if reached end
-        if (playhead.position > this.width) {
-            playhead.setPosition(0);
+        if (playhead.position >= 1.0) {
+            playhead.setPosition(playhead.position - 1.0);
         }
     }
 
     /**
      * Override: Sample data at playhead's current position
+     * Samples based on data domain, not pixel positions, ensuring consistent
+     * event detection regardless of visualization width.
+     * Tracks recently sampled indices to avoid re-sampling the same data points.
      * @param {Playhead} playhead
      */
     sampleDataAtPlayhead(playhead) {
         if (!this.data || this.data.length === 0) return;
+        if (!this.xScale || !this.yScale) return;
 
-        const xPos = Math.floor(playhead.position);
+        // Initialize tracking set for this playhead if needed
+        if (!this.recentlySampledIndices.has(playhead.id)) {
+            this.recentlySampledIndices.set(playhead.id, new Set());
+        }
+        const recentlySampled = this.recentlySampledIndices.get(playhead.id);
 
-        // Find data points at this X position
-        const svg = d3.select(this.$('#my_dataviz svg'));
-        if (!svg.node()) return;
+        // Convert playhead percentage (0-1) to data domain value
+        const [minDate, maxDate] = this.xDomain;
+        const dateDomain = maxDate - minDate;
+        const targetDate = new Date(minDate.getTime() + (playhead.position * dateDomain));
 
-        const parent = svg.select('g');
+        // Use wider window for reliable data catching, but track indices to prevent re-sampling
+        const sampleWindow = 0.005; // ±0.5% of domain - wide enough to reliably catch data
+        const windowStart = new Date(minDate.getTime() + ((playhead.position - sampleWindow) * dateDomain));
+        const windowEnd = new Date(minDate.getTime() + ((playhead.position + sampleWindow) * dateDomain));
+
+        // Find data points within window that haven't been sampled recently
         let yValueSum = 0;
         let yValueCount = 0;
+        const sampledIndices = [];
+        const newlySampledIndices = [];
 
-        // Sample Y values from circles at this X position and animate them
-        parent.selectAll(`.x-${xPos}`).each(function() {
-            const circle = d3.select(this);
-            const cy = parseFloat(circle.attr('cy'));
-            if (!isNaN(cy)) {
-                yValueSum += cy;
-                yValueCount++;
+        this.data.forEach((d, index) => {
+            const dataDate = this.getX(d);
+            if (dataDate >= windowStart && dataDate <= windowEnd) {
+                sampledIndices.push(index);
 
-                // Animate the sampled datapoint with playhead color
-                circle
-                    .transition()
-                    .duration(100)
-                    .attr('r', 6)
-                    .style('fill', playhead.color)
-                    .style('opacity', 1)
-                    .transition()
-                    .duration(200)
-                    .attr('r', 1.5)
-                    .style('fill', '#69b3a2')
-                    .style('opacity', 0.8);
+                // Only sample if not recently sampled
+                if (!recentlySampled.has(index)) {
+                    const yValue = this.getY(d);
+                    yValueSum += yValue;
+                    yValueCount++;
+                    newlySampledIndices.push(index);
+                    recentlySampled.add(index);
+                }
             }
         });
 
+        // Clear indices that are now behind the playhead (outside the window)
+        const clearThreshold = playhead.position - (sampleWindow * 2);
+        this.data.forEach((d, index) => {
+            const dataDate = this.getX(d);
+            const dataPosition = (dataDate - minDate) / dateDomain;
+            if (dataPosition < clearThreshold) {
+                recentlySampled.delete(index);
+            }
+        });
+
+        // Animate only newly sampled data points (not re-sampled ones)
+        if (newlySampledIndices.length > 0) {
+            const svg = d3.select(this.$('#my_dataviz svg'));
+            if (svg.node()) {
+                const parent = svg.select('g');
+                parent.selectAll('circle')
+                    .each(function(d, i) {
+                        if (newlySampledIndices.includes(i)) {
+                            const circle = d3.select(this);
+                            circle
+                                .transition()
+                                .duration(100)
+                                .attr('r', 6)
+                                .style('fill', playhead.color)
+                                .style('opacity', 1)
+                                .transition()
+                                .duration(200)
+                                .attr('r', 1.5)
+                                .style('fill', '#69b3a2')
+                                .style('opacity', 0.8);
+                        }
+                    });
+            }
+        }
+
         if (yValueCount > 0) {
-            // Average Y position in SVG coordinates
-            const avgY = yValueSum / yValueCount;
+            // Average Y value in data coordinates
+            const avgYData = yValueSum / yValueCount;
+
+            // Convert to SVG coordinates for display
+            const avgYPixel = this.yScale(avgYData);
 
             // Normalize to 0-1 (invert because SVG Y increases downward)
-            const normalizedValue = 1.0 - (avgY / this.height);
+            const normalizedValue = 1.0 - (avgYPixel / this.height);
 
             // Call playhead's sample method
-            playhead.sampleValue(avgY, normalizedValue);
+            playhead.sampleValue(avgYPixel, normalizedValue);
         }
     }
 
@@ -228,11 +341,19 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
             return [];
         }
 
-        const currentPos = playhead.position;
+        // Current position is percentage (0-1), convert to pixels
+        const currentPosPercent = playhead.position;
         const speed = playhead.speed;
         const ticksPerPixel = 1.0 / speed; // How many ticks to advance 1 pixel
         const pixelsAhead = ticksAhead / ticksPerPixel;
-        const endPos = currentPos + pixelsAhead;
+
+        // Calculate percentage range for lookahead
+        const percentAhead = pixelsAhead / this.width;
+        const endPosPercent = currentPosPercent + percentAhead;
+
+        // Convert to pixel positions for circle comparison
+        const currentPos = currentPosPercent * this.width;
+        const endPos = endPosPercent * this.width;
 
         // Get SVG scales for coordinate conversion
         const svg = d3.select(this.$('#my_dataviz svg'));
@@ -366,6 +487,9 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         this.playheads.forEach((playhead, index) => {
             if (!playhead.enabled) return;
 
+            // Convert percentage position (0-1) to pixel position
+            const xPosition = playhead.position * this.width;
+
             // Render playhead line
             parent.append('line')
                 .attr('class', 'multi-playhead')
@@ -373,9 +497,9 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
                 .style('stroke', playhead.color)
                 .style('stroke-width', 2)
                 .style('opacity', 0.7)
-                .attr('x1', playhead.position)
+                .attr('x1', xPosition)
                 .attr('y1', 0)
-                .attr('x2', playhead.position)
+                .attr('x2', xPosition)
                 .attr('y2', this.height);
 
             // Render source light (draggable circle at top of playhead)
@@ -383,7 +507,7 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
                 .attr('class', 'playhead-source-light')
                 .attr('data-playhead-id', playhead.id)
                 .attr('data-visualizer-id', this.getVisualizerId())
-                .attr('cx', playhead.position)
+                .attr('cx', xPosition)
                 .attr('cy', 10)  // Near the top of the plot area
                 .attr('r', 8)
                 .style('fill', playhead.color)
@@ -446,6 +570,10 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
             ])
             .range([0, this.width]);
 
+        // Store scales for data sampling
+        this.xScale = x;
+        this.xDomain = x.domain();
+
         svg.append('g')
             .attr('transform', `translate(0,${this.height})`)
             .call(d3.axisBottom(x));
@@ -454,6 +582,8 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         const y = d3.scaleLinear()
             .domain([50, 250])
             .range([this.height, 0]);
+
+        this.yScale = y;
 
         svg.append('g')
             .call(d3.axisLeft(y));
@@ -485,6 +615,13 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         const getX = (d) => new Date(d[this.xColumn]);
         const getY = (d) => d[this.yColumn];
 
+        // Store data accessors for sampling
+        this.getX = getX;
+        this.getY = getY;
+
+        // Clear recently sampled tracking when data reloads
+        this.recentlySampledIndices.clear();
+
         // Plot data points
         svg.append('g')
             .selectAll('dot')
@@ -513,6 +650,12 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
 
         // Render playheads after data is loaded
         this.renderPlayheads();
+
+        // Add resize handle (inherited from base class)
+        this.addResizeHandle();
+
+        // Set initial parent container size
+        this.updateParentContainerSize();
     }
 }
 

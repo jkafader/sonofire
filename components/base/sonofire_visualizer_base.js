@@ -1,5 +1,5 @@
 import { SonofireBase } from './sonofire_base.js';
-import { PlayheadsMixin } from '../../lib/mixins/playheads.js';
+import { PlayheadsMixin, PLAYHEAD_SIDEBAR_WIDTH } from '../../lib/mixins/playheads.js';
 import { SCALES, SCALE_TONES } from '../../lib/midi_data.js';
 
 /**
@@ -57,9 +57,21 @@ class SonofireVisualizerBaseCore extends SonofireBase {
         this.scaleTones = this.getAttribute('data-scale-tones') || '7'; // All scale tones
         this.octaves = this.getAttribute('data-octaves') || '3';
 
-        // Dimensions from config
-        if (this.config.width) this.width = this.config.width;
-        if (this.config.height) this.height = this.config.height;
+        // Dimensions from attributes or config (if not set, will be detected from container)
+        const widthAttr = this.getAttribute('width');
+        const heightAttr = this.getAttribute('height');
+
+        if (widthAttr) {
+            this.width = parseInt(widthAttr);
+        } else if (this.config.width) {
+            this.width = this.config.width;
+        }
+
+        if (heightAttr) {
+            this.height = parseInt(heightAttr);
+        } else if (this.config.height) {
+            this.height = this.config.height;
+        }
     }
 
     /**
@@ -258,6 +270,108 @@ class SonofireVisualizerBaseCore extends SonofireBase {
                 source: this.tagName.toLowerCase()
             });
         });
+    }
+
+    // ========================================
+    // Resize Functionality
+    // ========================================
+
+    /**
+     * Get the visualization container element
+     * Subclasses can override to specify different container selectors
+     * @returns {HTMLElement|null}
+     */
+    getVisualizationContainer() {
+        return this.$('#my_dataviz');
+    }
+
+    /**
+     * Update parent container size to match current visualization dimensions
+     * Called on initial render and during resize operations
+     */
+    updateParentContainerSize() {
+        const parentElement = this.parentElement;
+        if (parentElement && parentElement.style) {
+            // Set explicit width on parent to match visualization + sidebar + padding
+            const newParentWidth = this.width + PLAYHEAD_SIDEBAR_WIDTH + 70;
+            const newParentHeight = this.height + 40;
+            parentElement.style.width = `${newParentWidth}px`;
+            parentElement.style.minHeight = `${newParentHeight}px`;
+            parentElement.style.flex = 'none'; // Override flex sizing
+        }
+    }
+
+    /**
+     * Add resize handle to lower-right corner of visualization
+     * Enables drag-to-resize functionality for all visualizer types
+     */
+    addResizeHandle() {
+        const container = this.getVisualizationContainer();
+        if (!container) return;
+
+        // Remove existing resize handle if present
+        const existingHandle = container.querySelector('.resize-handle');
+        if (existingHandle) {
+            existingHandle.remove();
+        }
+
+        // Create resize handle
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'resize-handle';
+        resizeHandle.style.cssText = `
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 20px;
+            height: 20px;
+            background: linear-gradient(135deg, transparent 50%, #4ec9b0 50%);
+            cursor: nwse-resize;
+            z-index: 100;
+        `;
+
+        container.style.position = 'relative';
+        container.appendChild(resizeHandle);
+
+        // Add resize functionality
+        let isResizing = false;
+        let startX, startY, startWidth, startHeight;
+
+        const startResize = (e) => {
+            isResizing = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            startWidth = this.width;
+            startHeight = this.height;
+            e.preventDefault();
+
+            document.addEventListener('mousemove', handleResize);
+            document.addEventListener('mouseup', stopResize);
+        };
+
+        const handleResize = (e) => {
+            if (!isResizing) return;
+
+            const deltaX = e.clientX - startX;
+            const deltaY = e.clientY - startY;
+
+            // Update internal dimensions (minimum 300x200)
+            this.width = Math.max(300, startWidth + deltaX);
+            this.height = Math.max(200, startHeight + deltaY);
+
+            // Update parent container size to match
+            this.updateParentContainerSize();
+
+            // Re-render the graph with new dimensions
+            this.renderGraph();
+        };
+
+        const stopResize = () => {
+            isResizing = false;
+            document.removeEventListener('mousemove', handleResize);
+            document.removeEventListener('mouseup', stopResize);
+        };
+
+        resizeHandle.addEventListener('mousedown', startResize);
     }
 }
 

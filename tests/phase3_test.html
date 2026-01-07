@@ -85,8 +85,8 @@
             log(`🎭 Mood changed: ${data.mood}`, 'info');
         });
 
-        PubSub.subscribe('context:spareness', (data) => {
-            log(`🎚️ Spareness changed: ${data.spareness.toFixed(2)}`, 'info');
+        PubSub.subscribe('context:density', (data) => {
+            log(`🎚️ Density changed: ${data.density.toFixed(2)}`, 'info');
         });
 
         PubSub.subscribe('music:chord', (data) => {

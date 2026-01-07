@@ -347,8 +347,9 @@ export class SonofireBassist extends BaseInstrumentalist {
         const voicing = this.currentChord.voicing || [];
         const bassRoot = this.toBassOctave(root);
 
-        // Density check - sometimes skip notes when sparse
-        const playProbability = this.walkingDensity * (1.0 - this.spareness * 0.5);
+        // Density affects play probability as a gradient
+        // At low density: skip many notes, at high density: play most notes
+        const playProbability = this.walkingDensity * (0.3 + this.density * 0.7);
         if (beatInBar !== 0 && Math.random() > playProbability) {
             return null; // Skip this beat
         }
@@ -373,15 +374,19 @@ export class SonofireBassist extends BaseInstrumentalist {
         }
 
         // Weight different note choices
+        // Density affects how adventurous the note choices are
+        const chromaticWeight = 0.01 + (this.density * 0.05); // More chromatic at high density
+        const scaleWeight = 0.05 + (this.density * 0.10);    // More scale tones at high density
+
         bassRange.forEach(note => {
             const pitchClass = note % 12;
             const rootPC = root % 12;
 
-            let weight = 0.01; // Base weight for chromatic notes
+            let weight = chromaticWeight; // Base weight for chromatic notes
 
-            // Root: 40% weight
+            // Root: 40% weight (less at high density to add variety)
             if (pitchClass === rootPC) {
-                weight = 0.40;
+                weight = 0.40 - (this.density * 0.10);
             }
             // Fifth: 30% weight
             else if (pitchClass === (rootPC + 7) % 12) {
@@ -391,13 +396,13 @@ export class SonofireBassist extends BaseInstrumentalist {
             else if (chordTones.includes(pitchClass)) {
                 weight = 0.20;
             }
-            // Scale tones: 5% weight
+            // Scale tones: variable weight based on density
             else if (scaleTones.includes(pitchClass)) {
-                weight = 0.05;
+                weight = scaleWeight;
             }
-            // Chromatic approach to root (half-step below): 10% weight
+            // Chromatic approach to root (half-step below): more weight at high density
             else if (this.currentBassNote && pitchClass === (rootPC - 1 + 12) % 12) {
-                weight = 0.10;
+                weight = 0.10 + (this.density * 0.10);
             }
 
             // Favor stepwise motion from last note
@@ -406,7 +411,8 @@ export class SonofireBassist extends BaseInstrumentalist {
                 if (interval <= 2) {
                     weight *= 1.5; // Boost stepwise motion
                 } else if (interval >= 7) {
-                    weight *= 0.5; // Reduce large leaps
+                    // At high density, allow more leaps
+                    weight *= (0.5 + this.density * 0.3);
                 }
             }
 
@@ -428,12 +434,22 @@ export class SonofireBassist extends BaseInstrumentalist {
         const bassRoot = this.toBassOctave(root);
 
         // Pedal tone: Always play the same note (usually root)
-        // Only play on beats 1 and 3 when sparse
-        if (this.spareness > 0.5 && (beatInBar === 1 || beatInBar === 3)) {
-            return null; // Skip beats 2 and 4 when sparse
+        // Density affects which beats get played
+        // At low density: only beats 0 and 2 (1 and 3)
+        // At high density: all beats
+        const playProbability = 0.5 + (this.density * 0.5);
+
+        // Beat 0 and 2 are more likely to play
+        if (beatInBar === 0 || beatInBar === 2) {
+            return bassRoot;
         }
 
-        return bassRoot;
+        // Other beats only play based on density
+        if (Math.random() < playProbability) {
+            return bassRoot;
+        }
+
+        return null;
     }
 
     /**

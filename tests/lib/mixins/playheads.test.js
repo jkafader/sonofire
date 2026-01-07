@@ -242,7 +242,7 @@ describe('PlayheadsMixin', () => {
         });
 
         it('should respond to clock:tick events', () => {
-            const playhead = visualizer.addPlayhead({ speed: 1, enabled: true });
+            const playhead = visualizer.addPlayhead({ speed: 1, position: 0, enabled: true });
 
             PubSub.publish('clock:tick', { tick: 1 });
 
@@ -272,9 +272,9 @@ describe('PlayheadsMixin', () => {
         });
 
         it('should restore playheads from PubSub', () => {
-            // Add playheads and save state
-            const ph1 = visualizer.addPlayhead({ speed: 2, position: 100 });
-            const ph2 = visualizer.addPlayhead({ speed: 4, position: 200 });
+            // Add playheads and save state (using percentage positions 0-1)
+            const ph1 = visualizer.addPlayhead({ speed: 2, position: 0.25 });
+            const ph2 = visualizer.addPlayhead({ speed: 4, position: 0.75 });
 
             // Create new visualizer and restore
             const newVisualizer = new TestVisualizer();
@@ -283,9 +283,9 @@ describe('PlayheadsMixin', () => {
 
             expect(newVisualizer.playheads).toHaveLength(2);
             expect(newVisualizer.playheads[0].speed).toBe(2);
-            expect(newVisualizer.playheads[0].position).toBe(100);
+            expect(newVisualizer.playheads[0].position).toBe(0.25);
             expect(newVisualizer.playheads[1].speed).toBe(4);
-            expect(newVisualizer.playheads[1].position).toBe(200);
+            expect(newVisualizer.playheads[1].position).toBe(0.75);
         });
     });
 
@@ -303,8 +303,8 @@ describe('PlayheadsMixin', () => {
         });
 
         it('should rewind all playheads to position 0', () => {
-            const ph1 = visualizer.addPlayhead({ speed: 1, position: 100 });
-            const ph2 = visualizer.addPlayhead({ speed: 2, position: 200 });
+            const ph1 = visualizer.addPlayhead({ speed: 1, position: 0.5 });
+            const ph2 = visualizer.addPlayhead({ speed: 2, position: 0.8 });
 
             visualizer.rewind();
 

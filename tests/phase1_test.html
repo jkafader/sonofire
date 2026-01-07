@@ -146,12 +146,12 @@
 
             const pool = PubSub.last('context:pool');
             const mood = PubSub.last('context:mood');
-            const spareness = PubSub.last('context:spareness');
+            const density = PubSub.last('context:density');
             const tempo = PubSub.last('clock:tempo');
 
             log(`Pool: ${JSON.stringify(pool)}`, pool ? 'success' : 'error');
             log(`Mood: ${JSON.stringify(mood)}`, mood ? 'success' : 'error');
-            log(`Spareness: ${JSON.stringify(spareness)}`, spareness ? 'success' : 'error');
+            log(`Density: ${JSON.stringify(density)}`, density ? 'success' : 'error');
             log(`Tempo: ${JSON.stringify(tempo)}`, tempo ? 'success' : 'error');
         };
 

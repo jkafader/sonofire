@@ -55,6 +55,26 @@
             font-family: monospace;
             font-size: 12px;
         }
+        .visualization-container {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .plot-wrapper {
+            flex: 0 0 75%;
+            background: #252526;
+            padding: 10px;
+            border-left: 3px solid #4ec9b0;
+            min-width: 300px;
+        }
+        .controls-container {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .control-wrapper {
+            flex: 1 1 calc(50% - 10px);
+        }
     </style>
 </head>
 <body>
@@ -111,23 +131,48 @@
     </div>
 
     <!-- Control Components (Using new Pool/Tonic notation) -->
-    <!-- pools are e.g. 3♯, 2♯, 5♭, 0 --> 
-    <sonofire-conductor
-        data-pool="3♭"
-        data-tonic="C"
-        data-tempo="90"
-        data-mode="manual">
-    </sonofire-conductor>
+    <!-- pools are e.g. 3♯, 2♯, 5♭, 0 -->
+    <div class="controls-container">
+        <div class="control-wrapper conductor">
+            <sonofire-conductor
+                data-pool="3♭"
+                data-tonic="C"
+                data-tempo="90"
+                data-mode="manual">
+            </sonofire-conductor>
+        </div>
 
-    <sonofire-composer
-        data-progression-style="blues"
-        data-bars-per-chord="2"
-        data-progression-length="8"
-        data-use-probabilistic="true">
-    </sonofire-composer>
+        <div class="control-wrapper composer">
+            <sonofire-composer
+                data-progression-style="blues"
+                data-bars-per-chord="2"
+                data-progression-length="8"
+                data-use-probabilistic="true">
+            </sonofire-composer>
+        </div>
+    </div>
 
-    <!-- Visualizer (now includes built-in playhead management) -->
-    <sonofire-xy-plot id="main-xy-plot" width="720" height="300"></sonofire-xy-plot>
+    <!-- Visualizers (now include built-in playhead management) -->
+    <h2 style="color: #4ec9b0; margin-top: 30px;">Beer Production - Raw Data</h2>
+    <div class="visualization-container">
+        <div class="plot-wrapper">
+            <sonofire-xy-plot id="main-xy-plot" data-url="beer_production.csv"></sonofire-xy-plot>
+        </div>
+    </div>
+
+    <h2 style="color: #4ec9b0; margin-top: 30px;">Beer Production - 6-Month Moving Average</h2>
+    <div class="visualization-container">
+        <div class="plot-wrapper">
+            <sonofire-xy-plot id="moving-avg-6mo-plot" data-url="beer_production_6mo_avg.csv"></sonofire-xy-plot>
+        </div>
+    </div>
+
+    <h2 style="color: #4ec9b0; margin-top: 30px;">Beer Production - 2-Year Moving Average</h2>
+    <div class="visualization-container">
+        <div class="plot-wrapper">
+            <sonofire-xy-plot id="moving-avg-2yr-plot" data-url="beer_production_2yr_avg.csv"></sonofire-xy-plot>
+        </div>
+    </div>
 
     <!-- Instrumentalists -->
     <h1>Instrumentalists</h1>

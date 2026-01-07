@@ -32,73 +32,186 @@ export class SonofireDrummer extends BaseInstrumentalist {
         this.barCount = 0;
         this.currentPattern = null;
 
-        // Define grooves (16 steps = 16th notes in one bar of 4/4)
-        // 1 = hit, 0 = rest
-        this.grooves = this.defineGrooves();
+        // Define style layers for density gradients
+        this.styleLayers = this.defineStyleLayers();
+        this.fills = this.defineFills();
     }
 
     /**
-     * Define locked drum grooves
-     * Each groove is a fixed pattern that repeats every bar
-     * Steps: 0-15 = sixteen 16th notes in 4/4 time
+     * Define drum style layers with density gradients
+     * Each style has a base pattern (minimum density) and layers that add complexity
+     * Layers are applied probabilistically based on how far density exceeds their threshold
      */
-    defineGrooves() {
+    defineStyleLayers() {
         return {
-            // Basic rock - kick on 1 & 3, snare on 2 & 4, 8th note hi-hats
-            rock_basic: {
-                kick:   [1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0],
-                snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-                hihat:  [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0]
+            rock: {
+                base: {
+                    // Sparse rock: kick on 1&3, snare on 2&4, quarter note hihats
+                    kick:   [1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0],
+                    snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+                    hihat:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0]
+                },
+                layers: [
+                    {
+                        threshold: 0.25,  // Eighth note hihats
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0]
+                    },
+                    {
+                        threshold: 0.5,  // Add kick variations
+                        kick:   [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]
+                    },
+                    {
+                        threshold: 0.7,  // 16th note hihats
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1]
+                    },
+                    {
+                        threshold: 0.85,  // Add ghost notes on snare
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,1,0, 0,0,0,1, 0,0,1,0, 0,0,0,0],
+                        hihat:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]
+                    }
+                ]
             },
 
-            // Rock with more kicks - classic rock beat
-            rock_driving: {
-                kick:   [1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,1,0],  // Kick on 1, 3, and "and" of 2 & 4
-                snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-                hihat:  [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0]
-            },
-
-            // Disco/Four-on-floor - kick every quarter note
             disco: {
-                kick:   [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],  // Four on the floor
-                snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-                hihat:  [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0],
-                hihatOpen: [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0]  // Open on "and" of 2 & 4
+                base: {
+                    // Sparse disco: four-on-floor kick, backbeat snare, quarter hihats
+                    kick:   [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
+                    snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+                    hihat:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0]
+                },
+                layers: [
+                    {
+                        threshold: 0.3,  // Eighth note hihats
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0]
+                    },
+                    {
+                        threshold: 0.5,  // Open hihats on and of 2 & 4
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihatOpen: [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0]
+                    },
+                    {
+                        threshold: 0.7,  // 16th note hihats
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1]
+                    },
+                    {
+                        threshold: 0.85,  // Add more snare hits
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0],
+                        hihat:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]
+                    }
+                ]
             },
 
-            // Funk - syncopated kick, 16th note hi-hats
             funk: {
-                kick:   [1,0,0,1, 0,0,1,0, 1,0,1,0, 0,0,1,0],  // Syncopated funk kick
-                snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-                hihat:  [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1]   // 16th notes
+                base: {
+                    // Sparse funk: basic syncopated kick, backbeat snare
+                    kick:   [1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,1,0],
+                    snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+                    hihat:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0]
+                },
+                layers: [
+                    {
+                        threshold: 0.3,  // Eighth note hihats
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0]
+                    },
+                    {
+                        threshold: 0.4,  // Add more syncopated kicks
+                        kick:   [0,0,0,1, 0,0,0,0, 0,0,1,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]
+                    },
+                    {
+                        threshold: 0.6,  // 16th note hihats
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1]
+                    },
+                    {
+                        threshold: 0.8,  // Add ghost notes
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,1,0, 0,0,0,1, 0,0,1,0, 0,0,0,1],
+                        hihat:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]
+                    }
+                ]
             },
 
-            // Jazz - ride cymbal pattern (triplet feel approximated)
-            jazz_ride: {
-                kick:   [1,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],  // Light kick on 1
-                snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],  // Backbeat
-                ride:   [1,0,0,1, 0,0,1,0, 0,1,0,0, 1,0,0,1]   // Swing pattern
+            jazz: {
+                base: {
+                    // Sparse jazz: light kick, backbeat, ride pattern
+                    kick:   [1,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                    snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+                    ride:   [1,0,0,1, 0,0,1,0, 0,1,0,0, 1,0,0,1]
+                },
+                layers: [
+                    {
+                        threshold: 0.4,  // Add more kick
+                        kick:   [0,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        ride:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]
+                    },
+                    {
+                        threshold: 0.6,  // More complex ride pattern
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        ride:   [0,1,0,0, 1,0,0,1, 0,0,1,0, 0,1,0,0]
+                    },
+                    {
+                        threshold: 0.75,  // Add ghost notes and kicks
+                        kick:   [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0],
+                        snare:  [0,0,1,0, 0,0,0,0, 0,0,1,0, 0,0,0,0],
+                        ride:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]
+                    }
+                ]
             },
 
-            // Breakbeat (Amen break inspired)
             breakbeat: {
-                kick:   [1,0,0,1, 0,0,0,0, 0,0,1,0, 0,0,0,0],
-                snare:  [0,0,0,0, 1,0,0,1, 0,0,0,0, 1,0,0,1],
-                hihat:  [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0]
-            },
-
-            // Sparse - minimal pattern for high spareness
-            sparse: {
-                kick:   [1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0],
-                snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-                hihat:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0]   // Quarter notes only
-            },
-
-            // Very sparse - just backbeat
-            very_sparse: {
-                kick:   [1,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],  // Only on 1
-                snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-                hihat:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]   // No hi-hat when very sparse
+                base: {
+                    // Sparse breakbeat
+                    kick:   [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0],
+                    snare:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+                    hihat:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0]
+                },
+                layers: [
+                    {
+                        threshold: 0.3,  // Eighth note hihats
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0]
+                    },
+                    {
+                        threshold: 0.5,  // Add more kicks
+                        kick:   [0,0,0,1, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]
+                    },
+                    {
+                        threshold: 0.65,  // More complex snare pattern
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,1, 0,0,0,0, 0,0,0,1],
+                        hihat:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]
+                    },
+                    {
+                        threshold: 0.8,  // 16th note hihats
+                        kick:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        snare:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+                        hihat:  [0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1]
+                    }
+                ]
             }
         };
     }
@@ -178,10 +291,10 @@ export class SonofireDrummer extends BaseInstrumentalist {
             this.render(); // Update UI
         });
 
-        // Subscribe to spareness changes (drummer is primary responder)
-        this.subscribe('context:spareness', (data) => {
-            this.spareness = data.spareness;
-            console.log(`Drummer: Spareness changed to ${this.spareness.toFixed(2)}`);
+        // Subscribe to density changes (drummer is primary responder)
+        this.subscribe('context:density', (data) => {
+            this.density = data.density;
+            console.log(`Drummer: Density changed to ${this.density.toFixed(2)}`);
             this.selectGroove();
             this.render(); // Update UI
         });
@@ -217,17 +330,17 @@ export class SonofireDrummer extends BaseInstrumentalist {
             }
         });
 
-        // Register Groove parameter (select)
-        this.registerWhippableParameter('groove', {
-            label: 'Groove',
+        // Register Style parameter (select)
+        this.registerWhippableParameter('style', {
+            label: 'Style',
             parameterType: 'select',
-            elementSelector: '#groove-select',
+            elementSelector: '#style-select',
             setter: (value) => {
-                // Map 0-1 to groove options
-                const grooves = Object.keys(this.grooves);
-                const index = Math.floor(value * grooves.length);
-                const clampedIndex = Math.min(index, grooves.length - 1);
-                this.setGroove(grooves[clampedIndex]);
+                // Map 0-1 to style options
+                const styles = Object.keys(this.styleLayers);
+                const index = Math.floor(value * styles.length);
+                const clampedIndex = Math.min(index, styles.length - 1);
+                this.setDrumStyle(styles[clampedIndex]);
             }
         });
 
@@ -238,83 +351,80 @@ export class SonofireDrummer extends BaseInstrumentalist {
     }
 
     /**
-     * Select groove based on mood, spareness, and style
+     * Generate pattern based on style and density gradient
+     * Density is applied as a continuous parameter within each style
+     */
+    generatePatternFromDensity() {
+        const style = this.styleLayers[this.drumStyle] || this.styleLayers.rock;
+        const pattern = {};
+
+        // Start with base pattern (cloned)
+        for (const [drum, hits] of Object.entries(style.base)) {
+            pattern[drum] = [...hits];
+        }
+
+        // Apply each layer probabilistically based on density
+        for (const layer of style.layers) {
+            if (this.density >= layer.threshold) {
+                // Calculate how far above threshold we are (0-1 scale)
+                const nextThreshold = style.layers.find(l => l.threshold > layer.threshold)?.threshold || 1.0;
+                const range = nextThreshold - layer.threshold;
+                const progress = Math.min(1.0, (this.density - layer.threshold) / range);
+
+                // Apply hits from this layer with probability based on progress
+                for (const [drum, hits] of Object.entries(layer)) {
+                    if (drum === 'threshold') continue;
+
+                    // Initialize drum array if it doesn't exist
+                    if (!pattern[drum]) {
+                        pattern[drum] = new Array(16).fill(0);
+                    }
+
+                    // Apply layer hits with probability
+                    for (let i = 0; i < hits.length; i++) {
+                        if (hits[i] === 1 && Math.random() < progress) {
+                            pattern[drum][i] = 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        return pattern;
+    }
+
+    /**
+     * Select groove based on density and style
+     * Generates pattern dynamically using density gradient
      */
     selectGroove() {
-        // Spareness overrides everything
-        if (this.spareness > 0.8) {
-            this.currentPattern = this.grooves.very_sparse;
-            return;
-        } else if (this.spareness > 0.5) {
-            this.currentPattern = this.grooves.sparse;
-            return;
-        }
+        // Generate pattern based on current density and style
+        this.currentPattern = this.generatePatternFromDensity();
 
-        // Map mood + style to groove
-        if (this.mood === 'tense') {
-            // Tense = driving, busy
-            if (this.drumStyle === 'funk') {
-                this.currentPattern = this.grooves.funk;
-            } else if (this.drumStyle === 'breakbeat') {
-                this.currentPattern = this.grooves.breakbeat;
-            } else if (this.drumStyle === 'disco') {
-                this.currentPattern = this.grooves.disco;
-            } else {
-                this.currentPattern = this.grooves.rock_driving;
-            }
-        } else if (this.mood === 'relaxed') {
-            // Relaxed = laid back
-            if (this.drumStyle === 'jazz') {
-                this.currentPattern = this.grooves.jazz_ride;
-            } else {
-                this.currentPattern = this.grooves.rock_basic;
-            }
-        } else {
-            // Default based on style
-            switch (this.drumStyle) {
-                case 'jazz':
-                    this.currentPattern = this.grooves.jazz_ride;
-                    break;
-                case 'funk':
-                    this.currentPattern = this.grooves.funk;
-                    break;
-                case 'disco':
-                    this.currentPattern = this.grooves.disco;
-                    break;
-                case 'breakbeat':
-                    this.currentPattern = this.grooves.breakbeat;
-                    break;
-                default:
-                    this.currentPattern = this.grooves.rock_basic;
-            }
-        }
+        console.log(`Drummer: Generated ${this.drumStyle} pattern at density ${this.density.toFixed(2)}`);
     }
 
     /**
-     * Manually set groove by name
-     * @param {string} grooveName - Name of groove (e.g., 'rock_basic', 'funk', etc.)
+     * Manually set drum style
+     * @param {string} styleName - Name of style (e.g., 'rock', 'funk', 'disco', 'jazz', 'breakbeat')
      */
-    setGroove(grooveName) {
-        if (this.grooves[grooveName]) {
-            this.currentPattern = this.grooves[grooveName];
-            console.log(`Drummer: Groove manually set to ${grooveName}`);
+    setDrumStyle(styleName) {
+        if (this.styleLayers[styleName]) {
+            this.drumStyle = styleName;
+            this.selectGroove(); // Regenerate pattern with new style
+            console.log(`Drummer: Style manually set to ${styleName}`);
             this.render(); // Update UI
         } else {
-            console.warn(`Drummer: Unknown groove "${grooveName}"`);
+            console.warn(`Drummer: Unknown style "${styleName}"`);
         }
     }
 
     /**
-     * Get current groove name
-     * @returns {string} Current groove name
+     * Get current drum style
+     * @returns {string} Current drum style name
      */
-    getCurrentGrooveName() {
-        for (const [name, pattern] of Object.entries(this.grooves)) {
-            if (pattern === this.currentPattern) {
-                return name;
-            }
-        }
-        return 'unknown';
+    getCurrentStyleName() {
+        return this.drumStyle || 'rock';
     }
 
     /**
@@ -489,16 +599,16 @@ export class SonofireDrummer extends BaseInstrumentalist {
     }
 
     /**
-     * Render groove selector options
-     * @returns {string} HTML options for groove selector
+     * Render style selector options
+     * @returns {string} HTML options for style selector
      */
-    renderGrooveOptions() {
-        const currentGrooveName = this.getCurrentGrooveName();
-        const grooveNames = Object.keys(this.grooves);
+    renderStyleOptions() {
+        const currentStyleName = this.getCurrentStyleName();
+        const styleNames = Object.keys(this.styleLayers);
 
-        return grooveNames.map(name => {
-            const displayName = name.replace('_', ' ');
-            const selected = name === currentGrooveName ? 'selected' : '';
+        return styleNames.map(name => {
+            const displayName = name.charAt(0).toUpperCase() + name.slice(1); // Capitalize first letter
+            const selected = name === currentStyleName ? 'selected' : '';
             return `<option value="${name}" ${selected}>${displayName}</option>`;
         }).join('');
     }
@@ -507,8 +617,6 @@ export class SonofireDrummer extends BaseInstrumentalist {
      * Render UI
      */
     render() {
-        const grooveName = this.getCurrentGrooveName().replace('_', ' ');
-
         this.innerHTML = `
             <div style="background: #2d2d2d; padding: 10px; margin: 5px 0; border-left: 3px solid #d7ba7d;">
                 <strong style="color: #d7ba7d;">🥁 Drummer</strong>
@@ -517,12 +625,12 @@ export class SonofireDrummer extends BaseInstrumentalist {
                     <select id="channel-select" style="margin: 0 5px;">
                         ${this.renderChannelOptions()}
                     </select>
-                    | Groove:
-                    <select id="groove-select" style="margin: 0 5px;">
-                        ${this.renderGrooveOptions()}
+                    | Style:
+                    <select id="style-select" style="margin: 0 5px;">
+                        ${this.renderStyleOptions()}
                     </select>
                     | Mood: ${this.mood}
-                    | Sparse: ${(this.spareness * 100).toFixed(0)}%
+                    | Density: ${(this.density * 100).toFixed(0)}%
                     | <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
                     | <button id="debug-btn" style="padding: 2px 8px; margin: 0 5px;">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
                     | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
@@ -538,10 +646,10 @@ export class SonofireDrummer extends BaseInstrumentalist {
             };
         }
 
-        const grooveSelect = this.$('#groove-select');
-        if (grooveSelect) {
-            grooveSelect.onchange = (e) => {
-                this.setGroove(e.target.value);
+        const styleSelect = this.$('#style-select');
+        if (styleSelect) {
+            styleSelect.onchange = (e) => {
+                this.setDrumStyle(e.target.value);
             };
         }
 

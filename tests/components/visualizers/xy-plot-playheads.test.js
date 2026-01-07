@@ -34,13 +34,19 @@ describe('XY Plot - Playhead Rendering', () => {
         // Ensure playheads array is empty (override any restored playheads)
         xyPlot.playheads = [];
 
-        // Load test data
-        xyPlot.data = [
-            { x: 0, y: 100 },
-            { x: 100, y: 200 },
-            { x: 200, y: 150 },
-            { x: 300, y: 250 },
-        ];
+        // Mock loadData to return test data with proper date format
+        // Data spread across the domain (1956-1995) with many points for reliable sampling
+        // Using fixed values so data is consistent across multiple renders
+        xyPlot.loadData = async () => {
+            const data = [];
+            for (let year = 1956; year <= 1995; year++) {
+                data.push({
+                    date: `${year}-01-01T00:00:00Z`,
+                    production: 100 + ((year - 1956) * 3.75)  // Linear progression from 100 to 246
+                });
+            }
+            return data;
+        };
 
         // Trigger initial render
         await xyPlot.renderGraph();
@@ -55,8 +61,8 @@ describe('XY Plot - Playhead Rendering', () => {
 
     describe('Playhead Visual Rendering', () => {
         it('should render playhead line when playhead is added', () => {
-            // Add a playhead
-            const playhead = xyPlot.addPlayhead({ speed: 1, position: 100, enabled: true });
+            // Add a playhead at 50% position (percentage-based: 0-1)
+            const playhead = xyPlot.addPlayhead({ speed: 1, position: 0.5, enabled: true });
 
             // Query for playhead line in SVG
             const svg = xyPlot.querySelector('#my_dataviz svg');
@@ -64,28 +70,34 @@ describe('XY Plot - Playhead Rendering', () => {
 
             const playheadLine = svg.querySelector(`.multi-playhead[data-playhead-id="${playhead.id}"]`);
             expect(playheadLine).toBeTruthy();
-            expect(playheadLine.getAttribute('x1')).toBe('100');
-            expect(playheadLine.getAttribute('x2')).toBe('100');
+
+            // Position should be converted to pixels: 0.5 * 720 = 360
+            const expectedX = (0.5 * xyPlot.width).toString();
+            expect(playheadLine.getAttribute('x1')).toBe(expectedX);
+            expect(playheadLine.getAttribute('x2')).toBe(expectedX);
         });
 
         it('should render source light (draggable circle) when playhead is added', () => {
-            // Add a playhead
-            const playhead = xyPlot.addPlayhead({ speed: 1, position: 150, color: '#ff0000', enabled: true });
+            // Add a playhead at 25% position
+            const playhead = xyPlot.addPlayhead({ speed: 1, position: 0.25, color: '#ff0000', enabled: true });
 
             // Query for source light circle in SVG
             const svg = xyPlot.querySelector('#my_dataviz svg');
             const sourceLight = svg.querySelector(`.playhead-source-light[data-playhead-id="${playhead.id}"]`);
 
             expect(sourceLight).toBeTruthy();
-            expect(sourceLight.getAttribute('cx')).toBe('150');
+
+            // Position should be converted to pixels: 0.25 * 720 = 180
+            const expectedCx = (0.25 * xyPlot.width).toString();
+            expect(sourceLight.getAttribute('cx')).toBe(expectedCx);
             expect(sourceLight.style.fill).toBe('rgb(255, 0, 0)'); // #ff0000
         });
 
         it('should render multiple playheads', () => {
-            // Add multiple playheads
-            const ph1 = xyPlot.addPlayhead({ speed: 1, position: 50, enabled: true });
-            const ph2 = xyPlot.addPlayhead({ speed: 2, position: 150, enabled: true });
-            const ph3 = xyPlot.addPlayhead({ speed: 4, position: 250, enabled: true });
+            // Add multiple playheads at different percentage positions
+            const ph1 = xyPlot.addPlayhead({ speed: 1, position: 0.1, enabled: true });
+            const ph2 = xyPlot.addPlayhead({ speed: 2, position: 0.5, enabled: true });
+            const ph3 = xyPlot.addPlayhead({ speed: 4, position: 0.9, enabled: true });
 
             // Query for all playhead lines
             const svg = xyPlot.querySelector('#my_dataviz svg');
@@ -96,7 +108,7 @@ describe('XY Plot - Playhead Rendering', () => {
 
         it('should remove playhead line when playhead is removed', () => {
             // Add a playhead
-            const playhead = xyPlot.addPlayhead({ speed: 1, position: 100, enabled: true });
+            const playhead = xyPlot.addPlayhead({ speed: 1, position: 0.5, enabled: true });
 
             // Verify it's rendered
             let svg = xyPlot.querySelector('#my_dataviz svg');
@@ -114,7 +126,7 @@ describe('XY Plot - Playhead Rendering', () => {
 
         it('should remove source light when playhead is removed', () => {
             // Add a playhead
-            const playhead = xyPlot.addPlayhead({ speed: 1, position: 100, enabled: true });
+            const playhead = xyPlot.addPlayhead({ speed: 1, position: 0.5, enabled: true });
 
             // Verify source light is rendered
             let svg = xyPlot.querySelector('#my_dataviz svg');
@@ -132,7 +144,7 @@ describe('XY Plot - Playhead Rendering', () => {
 
         it('should not render disabled playheads', () => {
             // Add a disabled playhead
-            const playhead = xyPlot.addPlayhead({ speed: 1, position: 100, enabled: false });
+            const playhead = xyPlot.addPlayhead({ speed: 1, position: 0.5, enabled: false });
 
             // Query for playhead line
             const svg = xyPlot.querySelector('#my_dataviz svg');
@@ -143,7 +155,7 @@ describe('XY Plot - Playhead Rendering', () => {
 
         it('should update playhead visual when toggled on', () => {
             // Add a disabled playhead
-            const playhead = xyPlot.addPlayhead({ speed: 1, position: 100, enabled: false });
+            const playhead = xyPlot.addPlayhead({ speed: 1, position: 0.5, enabled: false });
 
             // Verify not rendered
             let svg = xyPlot.querySelector('#my_dataviz svg');
@@ -162,7 +174,7 @@ describe('XY Plot - Playhead Rendering', () => {
 
         it('should update playhead visual when toggled off', () => {
             // Add an enabled playhead
-            const playhead = xyPlot.addPlayhead({ speed: 1, position: 100, enabled: true });
+            const playhead = xyPlot.addPlayhead({ speed: 1, position: 0.5, enabled: true });
 
             // Verify rendered
             let svg = xyPlot.querySelector('#my_dataviz svg');
@@ -181,7 +193,7 @@ describe('XY Plot - Playhead Rendering', () => {
 
         it('should update playhead color when changed', () => {
             // Add a playhead
-            const playhead = xyPlot.addPlayhead({ speed: 1, position: 100, color: '#ff0000', enabled: true });
+            const playhead = xyPlot.addPlayhead({ speed: 1, position: 0.5, color: '#ff0000', enabled: true });
 
             // Change the color
             playhead.color = '#00ff00';
@@ -227,7 +239,8 @@ describe('XY Plot - Playhead Rendering', () => {
 
     describe('Playhead Advancement', () => {
         it('should update playhead position when advanced', async () => {
-            const playhead = xyPlot.addPlayhead({ speed: 1, position: 100, enabled: true });
+            const playhead = xyPlot.addPlayhead({ speed: 1, position: 0.1, enabled: true });
+            const initialPosition = playhead.position;
 
             // Simulate clock tick to advance playhead
             PubSub.publish('clock:tick', { tick: 1 });
@@ -235,13 +248,110 @@ describe('XY Plot - Playhead Rendering', () => {
             // Wait for advancement
             await new Promise(resolve => setTimeout(resolve, 10));
 
-            // Verify position changed
-            expect(playhead.position).toBeGreaterThan(100);
+            // Verify position changed (percentage-based: should be > initial position)
+            expect(playhead.position).toBeGreaterThan(initialPosition);
 
-            // Verify visual updated
+            // Verify playhead is still rendered (visual should exist)
             const svg = xyPlot.querySelector('#my_dataviz svg');
             const playheadLine = svg.querySelector(`.multi-playhead[data-playhead-id="${playhead.id}"]`);
-            expect(parseInt(playheadLine.getAttribute('x1'))).toBeGreaterThan(100);
+            expect(playheadLine).toBeTruthy();
+
+            // Verify position is consistent between internal state and visual
+            const expectedPixelPosition = Math.floor(playhead.position * xyPlot.width);
+            const actualPixelPosition = parseInt(playheadLine.getAttribute('x1'));
+            expect(actualPixelPosition).toBe(expectedPixelPosition);
+        });
+    });
+
+    describe('Width-Independent Event Sampling', () => {
+        it('should detect same number of events regardless of visualization width', async () => {
+            // Track sampled events by spying on playhead.sampleValue
+            const sampledEvents = [];
+            const playhead = xyPlot.addPlayhead({ speed: 1, position: 0.0, enabled: true });
+
+            const originalSampleValue = playhead.sampleValue.bind(playhead);
+            playhead.sampleValue = (rawValue, normalizedValue) => {
+                sampledEvents.push({ rawValue, normalizedValue, width: xyPlot.width });
+                originalSampleValue(rawValue, normalizedValue);
+            };
+
+            // Sample at position 0.5 with original width (720px)
+            playhead.setPosition(0.5);
+            xyPlot.sampleDataAtPlayhead(playhead);
+            await new Promise(resolve => setTimeout(resolve, 10));
+
+            const eventsAtWidth720 = sampledEvents.length;
+
+            // Resize to a different width
+            xyPlot.width = 1440;
+            await xyPlot.renderGraph();
+
+            // Clear sampled events and sample at same position with new width
+            sampledEvents.length = 0;
+            playhead.setPosition(0.5);
+            xyPlot.sampleDataAtPlayhead(playhead);
+            await new Promise(resolve => setTimeout(resolve, 10));
+
+            const eventsAtWidth1440 = sampledEvents.length;
+
+            // Both should have detected events (data exists at 50% position)
+            expect(eventsAtWidth720).toBeGreaterThan(0);
+            expect(eventsAtWidth1440).toBeGreaterThan(0);
+
+            // Event count should be the same regardless of width
+            expect(eventsAtWidth1440).toBe(eventsAtWidth720);
+
+            // Resize to an even different width
+            xyPlot.width = 360;
+            await xyPlot.renderGraph();
+
+            // Clear and sample again
+            sampledEvents.length = 0;
+            playhead.setPosition(0.5);
+            xyPlot.sampleDataAtPlayhead(playhead);
+            await new Promise(resolve => setTimeout(resolve, 10));
+
+            const eventsAtWidth360 = sampledEvents.length;
+
+            // Should still be the same
+            expect(eventsAtWidth360).toBe(eventsAtWidth720);
+        });
+
+        it('should sample same data values at same percentage position after resize', async () => {
+            const playhead = xyPlot.addPlayhead({ speed: 1, position: 0.3, enabled: true });
+
+            // Capture sampled value at original width
+            let sample1 = null;
+            const originalSampleValue = playhead.sampleValue.bind(playhead);
+            playhead.sampleValue = (rawValue, normalizedValue) => {
+                sample1 = { rawValue, normalizedValue };
+                originalSampleValue(rawValue, normalizedValue);
+            };
+
+            xyPlot.sampleDataAtPlayhead(playhead);
+            await new Promise(resolve => setTimeout(resolve, 10));
+
+            // Resize to different width
+            xyPlot.width = 1000;
+            await xyPlot.renderGraph();
+
+            // Capture sampled value at new width
+            let sample2 = null;
+            playhead.sampleValue = (rawValue, normalizedValue) => {
+                sample2 = { rawValue, normalizedValue };
+                originalSampleValue(rawValue, normalizedValue);
+            };
+
+            playhead.setPosition(0.3); // Same percentage position
+            xyPlot.sampleDataAtPlayhead(playhead);
+            await new Promise(resolve => setTimeout(resolve, 10));
+
+            // Should have sampled data both times
+            expect(sample1).toBeTruthy();
+            expect(sample2).toBeTruthy();
+
+            // Normalized values should be very close (within small tolerance for floating point)
+            expect(Math.abs(sample1.normalizedValue - sample2.normalizedValue)).toBeLessThan(0.01);
         });
     });
 });

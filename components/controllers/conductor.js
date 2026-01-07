@@ -17,7 +17,7 @@ export class SonofireConductor extends SonofireBase {
         this.initialScale = 'major';
         this.tempo = 120;
         this.mood = 'relaxed'; // 'tense' | 'relaxed' | 'sparse' | 'dense'
-        this.spareness = 0.5; // 0.0 (full/dense) → 1.0 (very sparse)
+        this.density = 0.5; // 0.0 (sparse) → 1.0 (full/dense)
 
         // Pool/tonic notation (new system)
         this.poolKey = null;     // e.g., "3♯", "0", "2♭"
@@ -64,7 +64,7 @@ export class SonofireConductor extends SonofireBase {
         super.setupSubscriptions();
 
         if (this.mode === 'auto') {
-            // In auto mode, listen to data events to adjust mood/spareness
+            // In auto mode, listen to data events to adjust mood/density
             this.subscribe('data:forecast', (msg) => {
                 this.handleForecastDeviation(msg);
             });
@@ -92,15 +92,15 @@ export class SonofireConductor extends SonofireBase {
             }
         });
 
-        // Register spareness parameter
-        this.registerWhippableParameter('spareness', {
-            label: 'Spareness',
+        // Register density parameter
+        this.registerWhippableParameter('density', {
+            label: 'Density',
             parameterType: 'number',
             min: 0.0,
             max: 1.0,
-            elementSelector: '#spareness-slider',
+            elementSelector: '#density-slider',
             setter: (value) => {
-                this.setSpareness(value);
+                this.setDensity(value);
             }
         });
 
@@ -130,9 +130,9 @@ export class SonofireConductor extends SonofireBase {
             this.setPoolAndTonic(poolKey, tonicName);
         }
 
-        // Publish initial mood and spareness
+        // Publish initial mood and density
         this.setMood(this.mood);
-        this.setSpareness(this.spareness);
+        this.setDensity(this.density);
 
         // Register whippable parameters (after render)
         this.registerWhippableParameters();
@@ -163,11 +163,11 @@ export class SonofireConductor extends SonofireBase {
     handleRegionData(regionData) {
         const { type, intensity } = regionData;
 
-        // Adjust spareness based on region intensity
+        // Adjust density based on region intensity
         if (type === 'hot' && intensity > 0.7) {
-            this.setSpareness(0.2); // Dense playing
+            this.setDensity(0.8); // Dense playing
         } else if (type === 'cold' || intensity < 0.3) {
-            this.setSpareness(0.8); // Sparse playing
+            this.setDensity(0.2); // Sparse playing
         }
     }
 
@@ -283,15 +283,15 @@ export class SonofireConductor extends SonofireBase {
     }
 
     /**
-     * Set the spareness level
+     * Set the density level
      */
-    setSpareness(spareness) {
+    setDensity(density) {
         // Clamp to 0.0-1.0
-        this.spareness = Math.max(0, Math.min(1, spareness));
+        this.density = Math.max(0, Math.min(1, density));
 
-        this.publish('context:spareness', { spareness: this.spareness });
+        this.publish('context:density', { density: this.density });
 
-        console.log(`Conductor: Spareness set to ${this.spareness.toFixed(2)}`);
+        console.log(`Conductor: Density set to ${this.density.toFixed(2)}`);
     }
 
     /**
@@ -421,9 +421,9 @@ export class SonofireConductor extends SonofireBase {
                     </select>
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <strong>Spareness:</strong>
-                    <input type="range" id="spareness-slider" min="0" max="100" value="${this.spareness * 100}" style="width: 200px;">
-                    <span id="spareness-value">${this.spareness.toFixed(2)}</span>
+                    <strong>Density:</strong>
+                    <input type="range" id="density-slider" min="0" max="100" value="${this.density * 100}" style="width: 200px;">
+                    <span id="density-value">${this.density.toFixed(2)}</span>
                 </div>
                 <div style="margin-bottom: 10px;">
                     <strong>Mode:</strong>
@@ -530,10 +530,10 @@ export class SonofireConductor extends SonofireBase {
             this.setMood(e.target.value);
         };
 
-        this.$('#spareness-slider').oninput = (e) => {
-            const spareness = parseInt(e.target.value) / 100;
-            this.setSpareness(spareness);
-            this.$('#spareness-value').textContent = spareness.toFixed(2);
+        this.$('#density-slider').oninput = (e) => {
+            const density = parseInt(e.target.value) / 100;
+            this.setDensity(density);
+            this.$('#density-value').textContent = density.toFixed(2);
         };
 
         this.$$('input[name="mode"]').forEach(radio => {
