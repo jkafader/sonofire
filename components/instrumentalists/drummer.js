@@ -1,5 +1,6 @@
 import { BaseInstrumentalist } from './base_instrumentalist.js';
-//import { PubSub } from '../../lib/pubsub.js';
+import { perlinNoise } from '../../lib/unit_noise.js';
+import { PubSub } from '../../lib/pubsub.js';
 
 /**
  * Drummer Component
@@ -31,6 +32,37 @@ export class SonofireDrummer extends BaseInstrumentalist {
         this.lastStep = -1;  // Track last step played
         this.barCount = 0;
         this.currentPattern = null;
+        this.currentFillPattern = null;  // Cached fill pattern for current fill
+
+        // Humanization state
+        this.humanizationEnabled = true;
+        this.humanizationIntensity = 0.7;  // 0-1, controlled by global slider
+        this.swingAmount = 0.0;            // 0-1, 0 = straight, 0.67 = triplet feel
+
+        // Perlin noise state for each voice
+        this.noiseTime = 0;  // Advances each step
+        this.voiceOffsets = {
+            kick: 0,
+            snare: 100,
+            hihat: 200,
+            hihatOpen: 300,
+            ride: 400,
+            crash: 500,
+            tom1: 600,
+            tom2: 700
+        };
+
+        // Humanization characteristics per voice
+        this.voiceHumanization = {
+            kick: { velocityRange: 10, timingRange: 5, noiseFreq: 0.1 },
+            snare: { velocityRange: 15, timingRange: 8, noiseFreq: 0.15 },
+            hihat: { velocityRange: 25, timingRange: 10, noiseFreq: 0.3 },
+            hihatOpen: { velocityRange: 20, timingRange: 8, noiseFreq: 0.25 },
+            ride: { velocityRange: 12, timingRange: 6, noiseFreq: 0.12 },
+            crash: { velocityRange: 8, timingRange: 3, noiseFreq: 0.08 },
+            tom1: { velocityRange: 12, timingRange: 7, noiseFreq: 0.15 },
+            tom2: { velocityRange: 12, timingRange: 7, noiseFreq: 0.15 }
+        };
 
         // Define style layers for density gradients
         this.styleLayers = this.defineStyleLayers();
@@ -218,19 +250,221 @@ export class SonofireDrummer extends BaseInstrumentalist {
 
     /**
      * Define fill patterns (last beat or two of a bar)
+     * Categorized by intensity: light, medium, heavy
      */
     defineFills() {
         return {
-            simple: {
+            // ========== LIGHT FILLS ==========
+            simple_snare: {
+                intensity: 'light',
                 snare: [0,0,0,0, 0,0,0,0, 0,0,0,0, 1,1,1,1],  // 16th notes on beat 4
-                crash: [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]   // Crash on next downbeat
             },
+
+            double_snare: {
+                intensity: 'light',
+                snare: [0,0,0,0, 0,0,0,0, 0,0,0,0, 1,0,1,0],  // 8th notes on beat 4
+            },
+
+            simple_tom: {
+                intensity: 'light',
+                tom1:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 1,0,1,0],
+                tom2:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,1,0,1],
+            },
+
+            kick_snare_simple: {
+                intensity: 'light',
+                kick:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 1,0,0,0],
+                snare: [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,1,1,1],
+            },
+
+            hihat_accent: {
+                intensity: 'light',
+                hihat: [0,0,0,0, 0,0,0,0, 0,0,0,0, 1,1,1,1],
+            },
+
+            // ========== MEDIUM FILLS ==========
             tom_roll: {
+                intensity: 'medium',
                 tom1:  [0,0,0,0, 0,0,0,0, 0,0,1,0, 1,0,0,0],
                 tom2:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,1,1,1],
-                crash: [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0]
+            },
+
+            snare_buildup: {
+                intensity: 'medium',
+                snare: [0,0,0,0, 0,0,0,0, 0,0,1,1, 1,1,1,1],
+            },
+
+            tom_cascade: {
+                intensity: 'medium',
+                tom1:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 1,1,0,0],
+                tom2:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,1,1],
+            },
+
+            kick_tom_combo: {
+                intensity: 'medium',
+                kick:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 1,0,1,0],
+                tom1:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,1,0,0],
+                tom2:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1],
+            },
+
+            snare_tom_roll: {
+                intensity: 'medium',
+                snare: [0,0,0,0, 0,0,0,0, 0,0,0,0, 1,1,0,0],
+                tom1:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,1,0],
+                tom2:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1],
+            },
+
+            // ========== HEAVY FILLS ==========
+            full_kit: {
+                intensity: 'heavy',
+                kick:  [0,0,0,0, 0,0,0,0, 1,0,0,0, 1,0,0,0],
+                snare: [0,0,0,0, 0,0,0,0, 0,1,0,1, 0,1,1,1],
+                tom1:  [0,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0],
+            },
+
+            crazy_toms: {
+                intensity: 'heavy',
+                tom1:  [0,0,0,0, 0,0,0,0, 1,0,1,0, 1,0,0,0],
+                tom2:  [0,0,0,0, 0,0,0,0, 0,1,0,1, 0,1,1,1],
+            },
+
+            sixteenth_barrage: {
+                intensity: 'heavy',
+                snare: [0,0,0,0, 0,0,0,0, 0,0,0,0, 1,1,1,1],
+                tom1:  [0,0,0,0, 0,0,0,0, 1,1,1,1, 0,0,0,0],
+                tom2:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+            },
+
+            full_barrage: {
+                intensity: 'heavy',
+                kick:  [0,0,0,0, 0,0,0,0, 1,0,1,0, 1,0,1,0],
+                snare: [0,0,0,0, 0,0,0,0, 0,1,0,1, 0,1,0,1],
+                tom1:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+            },
+
+            ascending_toms: {
+                intensity: 'heavy',
+                tom2:  [0,0,0,0, 0,0,0,0, 0,0,1,1, 0,0,0,0],
+                tom1:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 1,1,0,0],
+                snare: [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,1,1],
             }
         };
+    }
+
+    /**
+     * Calculate swing timing offset for a step position
+     * @param {number} step - Step in bar (0-15)
+     * @returns {number} Timing offset in milliseconds
+     */
+    calculateSwingOffset(step) {
+        if (this.swingAmount === 0) return 0;
+
+        // Swing affects "off-beat" 16th notes (positions 1, 3, 5, 7, 9, 11, 13, 15)
+        if (step % 2 === 0) return 0;  // On-beat, no offset
+
+        // Calculate delay based on swing amount
+        // At 0% swing: no delay
+        // At 66% swing: delay to create triplet feel (2:1 ratio)
+        // At 100% swing: maximum delay (not musical, but available)
+
+        // Get tempo from last clock tick
+        const tempo = PubSub.last('clock:tempo')?.bpm || 120;
+        const sixteenthMs = (60000 / tempo) / 4;  // Duration of 16th note
+        const maxDelay = sixteenthMs * 0.5;  // Max delay is half a 16th
+
+        return this.swingAmount * maxDelay;
+    }
+
+    /**
+     * Calculate micro-timing offset using Perlin noise
+     * @param {string} voiceName - Drum voice name
+     * @param {number} step - Step in bar (0-15)
+     * @returns {number} Timing offset in milliseconds
+     */
+    calculateMicroTimingOffset(voiceName, step) {
+        if (!this.humanizationEnabled) return 0;
+
+        const char = this.voiceHumanization[voiceName];
+        if (!char) return 0;
+
+        // Sample Perlin noise for this voice at current time
+        const noiseValue = perlinNoise.sample(
+            this.noiseTime + this.voiceOffsets[voiceName],
+            char.noiseFreq,
+            1.0  // Amplitude 1.0, will scale below
+        );
+
+        // Scale by voice-specific timing range and humanization intensity
+        const baseRange = char.timingRange;
+        const moodMultiplier = this.getMoodTimingMultiplier();
+        const finalRange = baseRange * this.humanizationIntensity * moodMultiplier;
+
+        // Tighter timing on downbeats
+        const downbeatFactor = (step % 4 === 0) ? 0.5 : 1.0;
+
+        return noiseValue * finalRange * downbeatFactor;
+    }
+
+    /**
+     * Get timing multiplier based on mood
+     * @returns {number} Multiplier for timing range
+     */
+    getMoodTimingMultiplier() {
+        switch (this.mood) {
+            case 'tense': return 0.5;    // Tight
+            case 'relaxed': return 1.5;  // Loose
+            case 'sparse': return 0.3;   // Very tight
+            case 'dense': return 1.2;    // Moderate
+            default: return 1.0;
+        }
+    }
+
+    /**
+     * Calculate velocity humanization using Perlin noise
+     * @param {string} voiceName - Drum voice name
+     * @param {number} baseVelocity - Base velocity before humanization
+     * @param {number} step - Step in bar (0-15)
+     * @returns {number} Velocity variation to add
+     */
+    calculateVelocityHumanization(voiceName, baseVelocity, step) {
+        if (!this.humanizationEnabled) return 0;
+
+        const char = this.voiceHumanization[voiceName];
+        if (!char) return 0;
+
+        // Sample Perlin noise for velocity
+        const noiseValue = perlinNoise.sample(
+            this.noiseTime + this.voiceOffsets[voiceName] + 1000,  // +1000 to decorrelate from timing
+            char.noiseFreq * 1.5,  // Slightly higher frequency for velocity
+            1.0
+        );
+
+        // Scale by voice-specific velocity range and humanization intensity
+        const baseRange = char.velocityRange;
+        const moodMultiplier = this.getMoodVelocityMultiplier();
+        const finalRange = baseRange * this.humanizationIntensity * moodMultiplier;
+
+        // Ghost notes (low velocity) get MORE variation
+        const ghostNoteFactor = (baseVelocity < 60) ? 1.5 : 1.0;
+
+        // Downbeats get LESS variation (more intentional)
+        const downbeatFactor = (step % 4 === 0) ? 0.7 : 1.0;
+
+        return noiseValue * finalRange * ghostNoteFactor * downbeatFactor;
+    }
+
+    /**
+     * Get velocity multiplier based on mood
+     * @returns {number} Multiplier for velocity range
+     */
+    getMoodVelocityMultiplier() {
+        switch (this.mood) {
+            case 'tense': return 1.3;    // More dynamic
+            case 'relaxed': return 0.8;  // Subtle
+            case 'sparse': return 0.5;   // Consistent
+            case 'dense': return 1.2;    // Dynamic
+            default: return 1.0;
+        }
     }
 
     /**
@@ -341,6 +575,30 @@ export class SonofireDrummer extends BaseInstrumentalist {
                 const index = Math.floor(value * styles.length);
                 const clampedIndex = Math.min(index, styles.length - 1);
                 this.setDrumStyle(styles[clampedIndex]);
+            }
+        });
+
+        // Register Humanization Intensity parameter
+        this.registerWhippableParameter('humanization', {
+            label: 'Humanization',
+            parameterType: 'number',
+            min: 0,
+            max: 1,
+            icon: '🎭',
+            setter: (value) => {
+                this.humanizationIntensity = value;
+            }
+        });
+
+        // Register Swing parameter
+        this.registerWhippableParameter('swing', {
+            label: 'Swing',
+            parameterType: 'number',
+            min: 0,
+            max: 1,
+            icon: '〰️',
+            setter: (value) => {
+                this.swingAmount = value;
             }
         });
 
@@ -469,6 +727,9 @@ export class SonofireDrummer extends BaseInstrumentalist {
         }
         this.lastStep = stepInBar;
 
+        // Advance noise time for humanization
+        this.noiseTime += 1;
+
         //console.log(`Drummer: Playing step ${stepInBar} (tick ${tick})`);
 
         // Track bar changes
@@ -511,26 +772,86 @@ export class SonofireDrummer extends BaseInstrumentalist {
     }
 
     /**
-     * Play a fill pattern
+     * Select fill pattern based on density and mood
+     * @returns {object} Fill pattern object
+     */
+    selectFill() {
+        const fills = this.defineFills();
+        const fillKeys = Object.keys(fills);
+
+        // Filter by intensity based on density
+        let intensityFilter;
+        if (this.density < 0.35) {
+            intensityFilter = 'light';
+        } else if (this.density < 0.7) {
+            intensityFilter = 'medium';
+        } else {
+            intensityFilter = 'heavy';
+        }
+
+        // Get candidates matching intensity
+        const candidates = fillKeys.filter(key =>
+            fills[key].intensity === intensityFilter
+        );
+
+        // Randomly select from candidates
+        if (candidates.length === 0) {
+            // Fallback to simple_snare if no candidates
+            return fills.simple_snare;
+        }
+
+        const selectedKey = candidates[Math.floor(Math.random() * candidates.length)];
+        return fills[selectedKey];
+    }
+
+    /**
+     * Play a fill pattern with humanization (rushing, crescendo)
      * @param {number} step - Step in bar (12-15 typically)
      */
     playFill(step) {
-        const fills = this.defineFills();
-        const fillPattern = fills.simple;
-        const baseVelocity = this.calculateBaseVelocity() + 10;
+        // Cache selected fill pattern at start of fill (step 12)
+        if (step === 12 && !this.currentFillPattern) {
+            this.currentFillPattern = this.selectFill();
+        }
+
+        const fillPattern = this.currentFillPattern || this.selectFill();
+        const baseVelocity = this.calculateBaseVelocity();
+
+        // Fill progress (0.0 at step 12, 1.0 at step 15)
+        const fillProgress = Math.max(0, (step - 12) / 3);
+
+        // Rushing: notes get earlier as fill progresses (accelerating into downbeat)
+        const rushOffset = -fillProgress * 15;  // Up to -15ms earlier
+
+        // Crescendo: velocity increases toward crash
+        const crescendoBoost = fillProgress * 20;  // Up to +20 velocity
 
         for (const [voiceName, pattern] of Object.entries(fillPattern)) {
+            if (voiceName === 'intensity') continue;  // Skip metadata
+
             if (pattern[step] === 1) {
-                this.playDrumHit(voiceName, step, baseVelocity);
+                const fillVelocity = baseVelocity + 10 + crescendoBoost;
+
+                // Apply timing offset via setTimeout for rushing effect
+                if (rushOffset !== 0) {
+                    setTimeout(() => {
+                        this.playDrumHit(voiceName, step, fillVelocity);
+                    }, Math.max(0, rushOffset));
+                } else {
+                    this.playDrumHit(voiceName, step, fillVelocity);
+                }
             }
         }
 
         // Crash on downbeat after fill
         if (step === 15) {
-            // Next step will be 0, schedule crash
+            // Reset cached fill pattern for next fill
+            this.currentFillPattern = null;
+
+            // Schedule crash with timing compensation for rush
             setTimeout(() => {
-                this.playDrumHit('crash', 0, baseVelocity + 15);
-            }, 50); // Small delay to align with downbeat
+                this.playDrumHit('crash', 0, baseVelocity + 35);
+            }, Math.max(0, 50 + rushOffset));  // Compensate for rush
         }
     }
 
@@ -562,9 +883,17 @@ export class SonofireDrummer extends BaseInstrumentalist {
             velocity += accentBoost;
         }
 
-        // Humanization - ONLY on velocity (±5), not on whether to play
-        const humanization = Math.floor(Math.random() * 10) - 5;
-        velocity = Math.max(30, Math.min(127, velocity + humanization));
+        // NEW: Perlin-based velocity humanization
+        const velocityHumanization = this.calculateVelocityHumanization(voiceName, velocity, step);
+        velocity += velocityHumanization;
+
+        // Clamp to MIDI range
+        velocity = Math.max(30, Math.min(127, velocity));
+
+        // Calculate timing offset
+        const swingOffset = this.calculateSwingOffset(step);
+        const microTimingOffset = this.calculateMicroTimingOffset(voiceName, step);
+        const totalTimingOffset = swingOffset + microTimingOffset;
 
         // Duration
         let duration = 100;
@@ -576,7 +905,14 @@ export class SonofireDrummer extends BaseInstrumentalist {
             duration = 200;
         }
 
-        this.sendNote(note, velocity, duration);
+        // Send note with timing offset
+        if (totalTimingOffset !== 0) {
+            setTimeout(() => {
+                this.sendNote(note, velocity, duration);
+            }, Math.max(0, totalTimingOffset));  // Negative offsets become 0
+        } else {
+            this.sendNote(note, velocity, duration);
+        }
     }
 
     /**
@@ -631,6 +967,20 @@ export class SonofireDrummer extends BaseInstrumentalist {
                     </select>
                     | Mood: ${this.mood}
                     | Density: ${(this.density * 100).toFixed(0)}%
+                </span>
+                <br>
+                <span style="margin-left: 10px; color: #888;">
+                    Humanization:
+                    <input type="range" id="humanization-slider" min="0" max="100"
+                           value="${Math.round(this.humanizationIntensity * 100)}"
+                           style="width: 100px; vertical-align: middle;">
+                    <span id="humanization-value">${Math.round(this.humanizationIntensity * 100)}%</span>
+                    | <button id="humanization-toggle" style="padding: 2px 8px; margin: 0 5px;">${this.humanizationEnabled ? '🎭 Human' : '🤖 Robot'}</button>
+                    | Swing:
+                    <input type="range" id="swing-slider" min="0" max="100"
+                           value="${Math.round(this.swingAmount * 100)}"
+                           style="width: 100px; vertical-align: middle;">
+                    <span id="swing-value">${Math.round(this.swingAmount * 100)}%</span>
                     | <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
                     | <button id="debug-btn" style="padding: 2px 8px; margin: 0 5px;">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
                     | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
@@ -664,6 +1014,36 @@ export class SonofireDrummer extends BaseInstrumentalist {
         if (debugBtn) {
             debugBtn.onclick = () => {
                 this.toggleDebug();
+            };
+        }
+
+        const humanizationSlider = this.$('#humanization-slider');
+        if (humanizationSlider) {
+            humanizationSlider.oninput = (e) => {
+                this.humanizationIntensity = parseInt(e.target.value) / 100;
+                const valueDisplay = this.$('#humanization-value');
+                if (valueDisplay) {
+                    valueDisplay.textContent = `${parseInt(e.target.value)}%`;
+                }
+            };
+        }
+
+        const humanizationToggle = this.$('#humanization-toggle');
+        if (humanizationToggle) {
+            humanizationToggle.onclick = () => {
+                this.humanizationEnabled = !this.humanizationEnabled;
+                this.render();
+            };
+        }
+
+        const swingSlider = this.$('#swing-slider');
+        if (swingSlider) {
+            swingSlider.oninput = (e) => {
+                this.swingAmount = parseInt(e.target.value) / 100;
+                const valueDisplay = this.$('#swing-value');
+                if (valueDisplay) {
+                    valueDisplay.textContent = `${parseInt(e.target.value)}%`;
+                }
             };
         }
 
