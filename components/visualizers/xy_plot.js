@@ -219,23 +219,37 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
 
 
     /**
-     * Override: Advance a specific playhead's position (percentage-based)
-     * Position advances as a constant percentage per tick, independent of pixel width.
-     * This ensures consistent playback speed regardless of visualization size.
+     * Override: Advance a specific playhead's position (domain-based)
+     * Position advances by a fixed increment in the X domain (time), not percentage.
+     * This ensures consistent playback timing aligned with the data's time scale.
      * @param {Playhead} playhead
      */
     advancePlayheadPosition(playhead) {
-        // Calculate percentage increment based on fixed sweep time
-        // At 1x speed, playhead takes TICKS_PER_FULL_SWEEP ticks to traverse 0-1
-        const increment = 1.0 / SonofireXYPlot.TICKS_PER_FULL_SWEEP;
+        if (!this.xDomain) return;
 
-        // Advance position as percentage (0-1)
-        playhead.setPosition(playhead.position + increment);
+        // Get the X domain (date range)
+        const [minDate, maxDate] = this.xDomain;
+        const domainSpan = maxDate - minDate; // Total time span in milliseconds
+
+        // Calculate time increment per tick
+        // At 1x speed, playhead traverses the full domain in TICKS_PER_FULL_SWEEP ticks
+        const timeIncrementMs = domainSpan / SonofireXYPlot.TICKS_PER_FULL_SWEEP;
+
+        // Convert current percentage to date
+        const currentDate = new Date(minDate.getTime() + (playhead.position * domainSpan));
+
+        // Advance by time increment
+        const newDate = new Date(currentDate.getTime() + timeIncrementMs);
+
+        // Convert back to percentage
+        let newPosition = (newDate - minDate) / domainSpan;
 
         // Loop back to start if reached end
-        if (playhead.position >= 1.0) {
-            playhead.setPosition(playhead.position - 1.0);
+        if (newPosition >= 1.0) {
+            newPosition = newPosition - 1.0;
         }
+
+        playhead.setPosition(newPosition);
     }
 
     /**
@@ -260,10 +274,12 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         const dateDomain = maxDate - minDate;
         const targetDate = new Date(minDate.getTime() + (playhead.position * dateDomain));
 
-        // Use wider window for reliable data catching, but track indices to prevent re-sampling
-        const sampleWindow = 0.005; // ±0.5% of domain - wide enough to reliably catch data
-        const windowStart = new Date(minDate.getTime() + ((playhead.position - sampleWindow) * dateDomain));
-        const windowEnd = new Date(minDate.getTime() + ((playhead.position + sampleWindow) * dateDomain));
+        // Use asymmetric window: small tolerance ahead, larger window behind
+        // This makes notes trigger as the playhead crosses them, not before
+        const windowAhead = 0.002;   // 0.2% ahead (small tolerance for timing)
+        const windowBehind = 0.008;  // 0.8% behind (catch notes just passed)
+        const windowStart = new Date(minDate.getTime() + ((playhead.position - windowBehind) * dateDomain));
+        const windowEnd = new Date(minDate.getTime() + ((playhead.position + windowAhead) * dateDomain));
 
         // Find data points within window that haven't been sampled recently
         let yValueSum = 0;
@@ -288,12 +304,22 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         });
 
         // Clear indices that are now behind the playhead (outside the window)
-        const clearThreshold = playhead.position - (sampleWindow * 2);
+        const clearThreshold = playhead.position - (windowBehind * 2);
         this.data.forEach((d, index) => {
             const dataDate = this.getX(d);
             const dataPosition = (dataDate - minDate) / dateDomain;
-            if (dataPosition < clearThreshold) {
-                recentlySampled.delete(index);
+
+            // Handle wrap-around: if playhead looped back to start, clear high positions
+            if (clearThreshold < 0) {
+                // Playhead just looped - clear positions > 0.95 (near end)
+                if (dataPosition > 0.95) {
+                    recentlySampled.delete(index);
+                }
+            } else {
+                // Normal case - clear positions behind the playhead
+                if (dataPosition < clearThreshold) {
+                    recentlySampled.delete(index);
+                }
             }
         });
 
@@ -508,8 +534,12 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         this.playheads.forEach((playhead, index) => {
             if (!playhead.enabled) return;
 
-            // Convert percentage position (0-1) to pixel position
-            const xPosition = playhead.position * this.width;
+            // Convert percentage position (0-1) to data domain, then use scale for pixel position
+            // This ensures playhead aligns with where data is being sampled
+            const [minDate, maxDate] = this.xDomain;
+            const dateDomain = maxDate - minDate;
+            const targetDate = new Date(minDate.getTime() + (playhead.position * dateDomain));
+            const xPosition = this.xScale(targetDate);
 
             // Render playhead line
             parent.append('line')
