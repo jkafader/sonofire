@@ -522,7 +522,7 @@ export class SonofireDrummer extends BaseInstrumentalist {
             this.mood = data.mood;
             console.log(`Drummer: Mood changed to ${this.mood}, selecting groove`);
             this.selectGroove();
-            this.render(); // Update UI
+            this.renderThrottled(); // Use throttled render to prevent jitter
         });
 
         // Subscribe to density changes (drummer is primary responder)
@@ -530,7 +530,7 @@ export class SonofireDrummer extends BaseInstrumentalist {
             this.density = data.density;
             console.log(`Drummer: Density changed to ${this.density.toFixed(2)}`);
             this.selectGroove();
-            this.render(); // Update UI
+            this.renderThrottled(); // Use throttled render to prevent jitter
         });
     }
 
@@ -671,7 +671,7 @@ export class SonofireDrummer extends BaseInstrumentalist {
             this.drumStyle = styleName;
             this.selectGroove(); // Regenerate pattern with new style
             console.log(`Drummer: Style manually set to ${styleName}`);
-            this.render(); // Update UI
+            this.renderThrottled(); // Use throttled render
         } else {
             console.warn(`Drummer: Unknown style "${styleName}"`);
         }
@@ -991,15 +991,21 @@ export class SonofireDrummer extends BaseInstrumentalist {
         // Setup event handlers
         const channelSelect = this.$('#channel-select');
         if (channelSelect) {
+            channelSelect.onfocus = () => this.startUIInteraction();
+            channelSelect.onblur = () => this.endUIInteraction();
             channelSelect.onchange = (e) => {
                 this.setChannel(parseInt(e.target.value));
+                this.endUIInteraction();
             };
         }
 
         const styleSelect = this.$('#style-select');
         if (styleSelect) {
+            styleSelect.onfocus = () => this.startUIInteraction();
+            styleSelect.onblur = () => this.endUIInteraction();
             styleSelect.onchange = (e) => {
                 this.setDrumStyle(e.target.value);
+                this.endUIInteraction();
             };
         }
 
@@ -1019,6 +1025,8 @@ export class SonofireDrummer extends BaseInstrumentalist {
 
         const humanizationSlider = this.$('#humanization-slider');
         if (humanizationSlider) {
+            humanizationSlider.onmousedown = () => this.startUIInteraction();
+            humanizationSlider.onmouseup = () => this.endUIInteraction();
             humanizationSlider.oninput = (e) => {
                 this.humanizationIntensity = parseInt(e.target.value) / 100;
                 const valueDisplay = this.$('#humanization-value');
@@ -1032,12 +1040,14 @@ export class SonofireDrummer extends BaseInstrumentalist {
         if (humanizationToggle) {
             humanizationToggle.onclick = () => {
                 this.humanizationEnabled = !this.humanizationEnabled;
-                this.render();
+                this.renderThrottled();
             };
         }
 
         const swingSlider = this.$('#swing-slider');
         if (swingSlider) {
+            swingSlider.onmousedown = () => this.startUIInteraction();
+            swingSlider.onmouseup = () => this.endUIInteraction();
             swingSlider.oninput = (e) => {
                 this.swingAmount = parseInt(e.target.value) / 100;
                 const valueDisplay = this.$('#swing-value');

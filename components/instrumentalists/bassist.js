@@ -849,7 +849,7 @@ export class SonofireBassist extends BaseInstrumentalist {
             this.density = data.density;
             console.log(`Bassist: Density changed to ${this.density.toFixed(2)}`);
             this.regenerateRhythmPattern();
-            this.render(); // Update UI
+            this.renderThrottled(); // Use throttled render to prevent jitter
         });
     }
 
@@ -1306,28 +1306,42 @@ export class SonofireBassist extends BaseInstrumentalist {
         `;
 
         // Setup event handlers
-        this.$('#channel-select').onchange = (e) => {
+        const channelSelect = this.$('#channel-select');
+        channelSelect.onfocus = () => this.startUIInteraction();
+        channelSelect.onblur = () => this.endUIInteraction();
+        channelSelect.onchange = (e) => {
             this.setChannel(parseInt(e.target.value));
+            this.endUIInteraction();
         };
 
-        this.$('#motion-type-select').onchange = (e) => {
+        const motionTypeSelect = this.$('#motion-type-select');
+        motionTypeSelect.onfocus = () => this.startUIInteraction();
+        motionTypeSelect.onblur = () => this.endUIInteraction();
+        motionTypeSelect.onchange = (e) => {
             this.motionType = e.target.value;
             console.log(`Bassist: Motion type changed to ${this.motionType}`);
             this.regenerateRhythmPattern();
-            this.render();
+            this.renderThrottled();
+            this.endUIInteraction();
         };
 
-        this.$('#rhythm-pattern-select').onchange = (e) => {
+        const rhythmPatternSelect = this.$('#rhythm-pattern-select');
+        rhythmPatternSelect.onfocus = () => this.startUIInteraction();
+        rhythmPatternSelect.onblur = () => this.endUIInteraction();
+        rhythmPatternSelect.onchange = (e) => {
             const value = e.target.value;
             this.rhythmPattern = (value === 'auto') ? null : value;
             console.log(`Bassist: Rhythm pattern changed to ${this.rhythmPattern || 'auto (motion type)'}`);
             this.regenerateRhythmPattern();
         };
 
-        this.$('#density-slider').oninput = (e) => {
+        const densitySlider = this.$('#density-slider');
+        densitySlider.onmousedown = () => this.startUIInteraction();
+        densitySlider.onmouseup = () => this.endUIInteraction();
+        densitySlider.oninput = (e) => {
             this.density = parseInt(e.target.value) / 100;
             this.regenerateRhythmPattern(); // Regenerate pattern with new density
-            this.render(); // Re-render to update display
+            this.renderThrottled(); // Use throttled render
         };
 
         this.$('#mute-btn').onclick = () => {
@@ -1340,6 +1354,8 @@ export class SonofireBassist extends BaseInstrumentalist {
 
         const humanizationSlider = this.$('#humanization-slider');
         if (humanizationSlider) {
+            humanizationSlider.onmousedown = () => this.startUIInteraction();
+            humanizationSlider.onmouseup = () => this.endUIInteraction();
             humanizationSlider.oninput = (e) => {
                 this.humanizationIntensity = parseInt(e.target.value) / 100;
                 const valueDisplay = this.$('#humanization-value');
@@ -1353,7 +1369,7 @@ export class SonofireBassist extends BaseInstrumentalist {
         if (humanizationToggle) {
             humanizationToggle.onclick = () => {
                 this.humanizationEnabled = !this.humanizationEnabled;
-                this.render();
+                this.renderThrottled();
             };
         }
 

@@ -468,7 +468,7 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
             this.density = data.density;
             console.log(`Keyboardist: Density changed to ${this.density.toFixed(2)}`);
             this.regenerateRhythmPattern();
-            this.render();
+            this.renderThrottled(); // Use throttled render to prevent jitter
         });
     }
 
@@ -713,33 +713,50 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
         `;
 
         // Setup event handlers
-        this.$('#channel-select').onchange = (e) => {
+        const channelSelect = this.$('#channel-select');
+        channelSelect.onfocus = () => this.startUIInteraction();
+        channelSelect.onblur = () => this.endUIInteraction();
+        channelSelect.onchange = (e) => {
             this.setChannel(parseInt(e.target.value));
+            this.endUIInteraction();
         };
 
-        this.$('#instrument-select').onchange = (e) => {
+        const instrumentSelect = this.$('#instrument-select');
+        instrumentSelect.onfocus = () => this.startUIInteraction();
+        instrumentSelect.onblur = () => this.endUIInteraction();
+        instrumentSelect.onchange = (e) => {
             this.instrumentStyle = e.target.value;
             console.log(`Keyboardist: Instrument changed to ${this.instrumentStyle}`);
             this.currentVoicing = this.generateVoicing();  // Regenerate voicing
-            this.render();
+            this.renderThrottled();
+            this.endUIInteraction();
         };
 
-        this.$('#approach-select').onchange = (e) => {
+        const approachSelect = this.$('#approach-select');
+        approachSelect.onfocus = () => this.startUIInteraction();
+        approachSelect.onblur = () => this.endUIInteraction();
+        approachSelect.onchange = (e) => {
             this.playingApproach = e.target.value;
             console.log(`Keyboardist: Approach changed to ${this.playingApproach}`);
             this.regenerateRhythmPattern();
             this.arpeggioIndex = 0;  // Reset arpeggio
-            this.render();
+            this.renderThrottled();
+            this.endUIInteraction();
         };
 
-        this.$('#density-slider').oninput = (e) => {
+        const densitySlider = this.$('#density-slider');
+        densitySlider.onmousedown = () => this.startUIInteraction();
+        densitySlider.onmouseup = () => this.endUIInteraction();
+        densitySlider.oninput = (e) => {
             this.density = parseInt(e.target.value) / 100;
             this.regenerateRhythmPattern();
-            this.render();
+            this.renderThrottled();
         };
 
         const humanizationSlider = this.$('#humanization-slider');
         if (humanizationSlider) {
+            humanizationSlider.onmousedown = () => this.startUIInteraction();
+            humanizationSlider.onmouseup = () => this.endUIInteraction();
             humanizationSlider.oninput = (e) => {
                 this.humanizationIntensity = parseInt(e.target.value) / 100;
                 const valueDisplay = this.$('#humanization-value');
@@ -753,7 +770,7 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
         if (humanizationToggle) {
             humanizationToggle.onclick = () => {
                 this.humanizationEnabled = !this.humanizationEnabled;
-                this.render();
+                this.renderThrottled();
             };
         }
 

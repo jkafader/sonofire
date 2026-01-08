@@ -27,6 +27,12 @@ export class BaseInstrumentalist extends SonofireBase {
 
         // Performance state
         this.lastNote = null;       // For melodic continuity
+
+        // Rendering throttle
+        this.renderTimeout = null;
+        this.renderThrottleMs = 150;  // Throttle renders to max once per 150ms
+        this.lastRenderTime = 0;
+        this.uiInteracting = false;   // Flag to prevent renders during UI interaction
     }
 
     /**
@@ -309,6 +315,56 @@ export class BaseInstrumentalist extends SonofireBase {
     setChannel(channel) {
         this.channel = Math.max(0, Math.min(15, channel));
         console.log(`${this.constructor.name}: Channel set to ${this.channel + 1}`);
+    }
+
+    /**
+     * Throttled render - prevents jitter from rapid updates
+     * Call this instead of render() directly to throttle UI updates
+     */
+    renderThrottled() {
+        // Skip render if user is actively interacting with UI
+        if (this.uiInteracting) {
+            return;
+        }
+
+        const now = performance.now();
+        const timeSinceLastRender = now - this.lastRenderTime;
+
+        // If enough time has passed, render immediately
+        if (timeSinceLastRender >= this.renderThrottleMs) {
+            this.lastRenderTime = now;
+            this.render();
+            return;
+        }
+
+        // Otherwise, schedule a render for later (debounce)
+        if (this.renderTimeout) {
+            clearTimeout(this.renderTimeout);
+        }
+
+        this.renderTimeout = setTimeout(() => {
+            this.lastRenderTime = performance.now();
+            this.render();
+            this.renderTimeout = null;
+        }, this.renderThrottleMs - timeSinceLastRender);
+    }
+
+    /**
+     * Mark UI as being interacted with (prevents renders)
+     * Call this on focus/mousedown for dropdowns/sliders
+     */
+    startUIInteraction() {
+        this.uiInteracting = true;
+    }
+
+    /**
+     * Mark UI interaction as complete (allows renders)
+     * Call this on blur/mouseup/change for dropdowns/sliders
+     */
+    endUIInteraction() {
+        this.uiInteracting = false;
+        // Render once after interaction ends to update any queued changes
+        this.renderThrottled();
     }
 
     /**
