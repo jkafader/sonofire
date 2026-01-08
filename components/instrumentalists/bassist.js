@@ -1,5 +1,7 @@
 import { BaseInstrumentalist } from './base_instrumentalist.js';
 import { weightedRandomSelect, chromaticApproach } from '../../lib/generative_algorithms.js';
+import { perlinNoise } from '../../lib/unit_noise.js';
+import { PubSub } from '../../lib/pubsub.js';
 
 /**
  * Bassist Component
@@ -30,6 +32,18 @@ export class SonofireBassist extends BaseInstrumentalist {
         // Playhead integration state
         this.lastPlayheadTrigger = 0;     // Timestamp of last playhead trigger
         this.plannedPassingStrategy = 'chord'; // Passing tone strategy from lookahead
+
+        // Humanization state
+        this.humanizationEnabled = true;
+        this.humanizationIntensity = 0.7;  // 0-1, controlled by slider
+        this.noiseTime = 0;  // Advances each step
+
+        // Bass-specific humanization characteristics
+        this.bassHumanization = {
+            velocityRange: 12,      // ±12 max velocity variation
+            timingRange: 6,         // ±6ms max timing offset
+            noiseFreq: 0.15         // Moderate noise frequency
+        };
 
         // Define motion types and rhythm layers
         this.motionTypes = this.defineMotionTypes();
@@ -699,6 +713,94 @@ export class SonofireBassist extends BaseInstrumentalist {
     }
 
     /**
+     * Calculate micro-timing offset using Perlin noise
+     * @param {number} position - Position in bar (0-15)
+     * @returns {number} Timing offset in milliseconds
+     */
+    calculateMicroTimingOffset(position) {
+        if (!this.humanizationEnabled) return 0;
+
+        const char = this.bassHumanization;
+
+        // Sample Perlin noise at current time
+        const noiseValue = perlinNoise.sample(
+            this.noiseTime,
+            char.noiseFreq,
+            1.0  // Amplitude 1.0, will scale below
+        );
+
+        // Scale by timing range and humanization intensity
+        const baseRange = char.timingRange;
+        const moodMultiplier = this.getMoodTimingMultiplier();
+        const finalRange = baseRange * this.humanizationIntensity * moodMultiplier;
+
+        // Tighter timing on downbeats (positions 0, 4, 8, 12)
+        const downbeatFactor = (position % 4 === 0) ? 0.4 : 1.0;
+
+        return noiseValue * finalRange * downbeatFactor;
+    }
+
+    /**
+     * Get timing multiplier based on mood
+     * @returns {number} Multiplier for timing range
+     */
+    getMoodTimingMultiplier() {
+        switch (this.mood) {
+            case 'tense': return 0.4;    // Very tight
+            case 'relaxed': return 1.6;  // Loose
+            case 'sparse': return 0.3;   // Extremely tight
+            case 'dense': return 1.3;    // Moderate loose
+            default: return 1.0;
+        }
+    }
+
+    /**
+     * Calculate velocity humanization using Perlin noise
+     * @param {number} baseVelocity - Base velocity before humanization
+     * @param {number} position - Position in bar (0-15)
+     * @returns {number} Velocity variation to add
+     */
+    calculateVelocityHumanization(baseVelocity, position) {
+        if (!this.humanizationEnabled) return 0;
+
+        const char = this.bassHumanization;
+
+        // Sample Perlin noise for velocity (offset by 1000 to decorrelate from timing)
+        const noiseValue = perlinNoise.sample(
+            this.noiseTime + 1000,
+            char.noiseFreq * 1.3,  // Slightly higher frequency for velocity
+            1.0
+        );
+
+        // Scale by velocity range and humanization intensity
+        const baseRange = char.velocityRange;
+        const moodMultiplier = this.getMoodVelocityMultiplier();
+        const finalRange = baseRange * this.humanizationIntensity * moodMultiplier;
+
+        // Ghost notes (low velocity) get MORE variation
+        const ghostNoteFactor = (baseVelocity < 60) ? 1.4 : 1.0;
+
+        // Downbeats get LESS variation (more intentional)
+        const downbeatFactor = (position % 4 === 0) ? 0.6 : 1.0;
+
+        return noiseValue * finalRange * ghostNoteFactor * downbeatFactor;
+    }
+
+    /**
+     * Get velocity multiplier based on mood
+     * @returns {number} Multiplier for velocity range
+     */
+    getMoodVelocityMultiplier() {
+        switch (this.mood) {
+            case 'tense': return 1.4;    // More dynamic
+            case 'relaxed': return 0.7;  // Subtle
+            case 'sparse': return 0.4;   // Very consistent
+            case 'dense': return 1.2;    // Dynamic
+            default: return 1.0;
+        }
+    }
+
+    /**
      * Specify which attributes to observe
      */
     static get observedAttributes() {
@@ -765,7 +867,7 @@ export class SonofireBassist extends BaseInstrumentalist {
      * Register parameters as whip targets
      */
     /**
-     * Register whippable parameters (only 3)
+     * Register whippable parameters
      */
     registerWhippableParameters() {
         // 1. Note Generation (pulse) - triggers rhythm
@@ -801,6 +903,18 @@ export class SonofireBassist extends BaseInstrumentalist {
             setter: (value) => {
                 this.density = value;
                 this.regenerateRhythmPattern();
+            }
+        });
+
+        // 4. Humanization Intensity (number) - timing and velocity variation
+        this.registerWhippableParameter('humanization', {
+            label: 'Humanization',
+            parameterType: 'number',
+            min: 0,
+            max: 1,
+            icon: '🎭',
+            setter: (value) => {
+                this.humanizationIntensity = value;
             }
         });
 
@@ -929,6 +1043,9 @@ export class SonofireBassist extends BaseInstrumentalist {
         if (position === this.lastPosition) return;
         this.lastPosition = position;
 
+        // Advance noise time for humanization
+        this.noiseTime += 1;
+
         // Ensure we have a current rhythm pattern
         if (!this.currentRhythmPattern) {
             this.regenerateRhythmPattern();
@@ -950,13 +1067,28 @@ export class SonofireBassist extends BaseInstrumentalist {
             );
 
             // Get velocity from pattern, modulated by accent control
-            const baseVelocity = velocity[position];
-            const finalVelocity = Math.round(baseVelocity * (this.accentVelocity / 100));
+            let baseVelocity = velocity[position];
+            let finalVelocity = Math.round(baseVelocity * (this.accentVelocity / 100));
 
-            // Play note
+            // Apply velocity humanization
+            const velocityHumanization = this.calculateVelocityHumanization(finalVelocity, position);
+            finalVelocity += Math.round(velocityHumanization);
+            finalVelocity = Math.max(30, Math.min(127, finalVelocity));
+
+            // Calculate timing offset
+            const microTimingOffset = this.calculateMicroTimingOffset(position);
+
+            // Play note with timing offset
             const duration = 400;
 
-            this.sendNote(note, finalVelocity, duration);
+            if (microTimingOffset !== 0) {
+                setTimeout(() => {
+                    this.sendNote(note, finalVelocity, duration);
+                }, Math.max(0, microTimingOffset));
+            } else {
+                this.sendNote(note, finalVelocity, duration);
+            }
+
             this.lastNote = note;
         }
     }
@@ -1157,6 +1289,15 @@ export class SonofireBassist extends BaseInstrumentalist {
                     | Density:
                     <input type="range" id="density-slider" min="0" max="100" value="${this.density * 100}" style="width: 100px; vertical-align: middle;">
                     <span style="margin-left: 5px;">${Math.round(this.density * 100)}%</span>
+                </span>
+                <br>
+                <span style="margin-left: 10px; color: #888;">
+                    Humanization:
+                    <input type="range" id="humanization-slider" min="0" max="100"
+                           value="${Math.round(this.humanizationIntensity * 100)}"
+                           style="width: 100px; vertical-align: middle;">
+                    <span id="humanization-value">${Math.round(this.humanizationIntensity * 100)}%</span>
+                    | <button id="humanization-toggle" style="padding: 2px 8px; margin: 0 5px;">${this.humanizationEnabled ? '🎭 Human' : '🤖 Robot'}</button>
                     | <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
                     | <button id="debug-btn" style="padding: 2px 8px; margin: 0 5px;">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
                     | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
@@ -1196,6 +1337,25 @@ export class SonofireBassist extends BaseInstrumentalist {
         this.$('#debug-btn').onclick = () => {
             this.toggleDebug();
         };
+
+        const humanizationSlider = this.$('#humanization-slider');
+        if (humanizationSlider) {
+            humanizationSlider.oninput = (e) => {
+                this.humanizationIntensity = parseInt(e.target.value) / 100;
+                const valueDisplay = this.$('#humanization-value');
+                if (valueDisplay) {
+                    valueDisplay.textContent = `${parseInt(e.target.value)}%`;
+                }
+            };
+        }
+
+        const humanizationToggle = this.$('#humanization-toggle');
+        if (humanizationToggle) {
+            humanizationToggle.onclick = () => {
+                this.humanizationEnabled = !this.humanizationEnabled;
+                this.render();
+            };
+        }
 
         // Re-render target lights after DOM update
         requestAnimationFrame(() => {
