@@ -153,12 +153,12 @@
     </div>
 
     <!-- Visualizers (now include built-in playhead management) -->
-    <h2 style="color: #4ec9b0; margin-top: 30px;">Beer Production - Raw Data</h2>
+    <!--h2 style="color: #4ec9b0; margin-top: 30px;">Beer Production - Raw Data</h2>
     <div class="visualization-container">
         <div class="plot-wrapper">
             <sonofire-xy-plot id="main-xy-plot" data-url="beer_production.csv"></sonofire-xy-plot>
         </div>
-    </div>
+    </div-->
 
     <h2 style="color: #4ec9b0; margin-top: 30px;">Beer Production - 6-Month Moving Average</h2>
     <div class="visualization-container">
@@ -203,6 +203,14 @@
         data-enabled="true">
     </sonofire-soloist>
 
+    <sonofire-keyboardist
+        data-channel="4"
+        data-instrument-style="piano"
+        data-playing-approach="comping"
+        data-density="0.5"
+        data-enabled="true">
+    </sonofire-keyboardist>
+
     <sonofire-drummer
         data-channel="9"
         data-drum-style="rock"
@@ -226,6 +234,7 @@
         import './components/controllers/composer.js';
         import './components/visualizers/xy_plot.js';
         import './components/instrumentalists/soloist.js';
+        import './components/instrumentalists/keyboardist.js';
         import './components/instrumentalists/drummer.js';
         import './components/instrumentalists/bassist.js';
 
