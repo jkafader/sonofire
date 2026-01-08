@@ -33,6 +33,8 @@ class SonofireVisualizerBaseCore extends SonofireBase {
             'data-url',
             'data-x-column',
             'data-y-column',
+            'data-x-domain',
+            'data-y-domain',
             'data-scale',
             'data-scale-root',
             'data-scale-tones',
@@ -50,6 +52,48 @@ class SonofireVisualizerBaseCore extends SonofireBase {
         this.dataUrl = this.getAttribute('data-url') || './beer_production.csv';
         this.xColumn = this.getAttribute('data-x-column') || 'date';
         this.yColumn = this.getAttribute('data-y-column') || 'production';
+
+        // X domain (optional manual override, format: "min,max" for dates or numbers)
+        const xDomainAttr = this.getAttribute('data-x-domain');
+        if (xDomainAttr) {
+            const parts = xDomainAttr.split(',').map(v => v.trim());
+            if (parts.length === 2) {
+                // Try parsing as dates first, then as numbers
+                const date1 = new Date(parts[0]);
+                const date2 = new Date(parts[1]);
+                if (!isNaN(date1.getTime()) && !isNaN(date2.getTime())) {
+                    this.xDomainOverride = [date1, date2];
+                } else {
+                    const num1 = parseFloat(parts[0]);
+                    const num2 = parseFloat(parts[1]);
+                    if (!isNaN(num1) && !isNaN(num2)) {
+                        this.xDomainOverride = [num1, num2];
+                    } else {
+                        console.warn(`Invalid data-x-domain format: "${xDomainAttr}". Expected "min,max" as dates or numbers`);
+                        this.xDomainOverride = null;
+                    }
+                }
+            } else {
+                console.warn(`Invalid data-x-domain format: "${xDomainAttr}". Expected "min,max"`);
+                this.xDomainOverride = null;
+            }
+        } else {
+            this.xDomainOverride = null; // Will be auto-detected from data
+        }
+
+        // Y domain (optional manual override, format: "min,max")
+        const yDomainAttr = this.getAttribute('data-y-domain');
+        if (yDomainAttr) {
+            const parts = yDomainAttr.split(',').map(v => parseFloat(v.trim()));
+            if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                this.yDomainOverride = parts; // [min, max]
+            } else {
+                console.warn(`Invalid data-y-domain format: "${yDomainAttr}". Expected "min,max"`);
+                this.yDomainOverride = null;
+            }
+        } else {
+            this.yDomainOverride = null; // Will be auto-detected from data
+        }
 
         // Musical parameters
         this.scale = this.getAttribute('data-scale') || '0'; // C major

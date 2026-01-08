@@ -109,12 +109,31 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
 
         this.svg = svg;
 
-        // Add X axis (time)
+        // Load data first to enable auto-detection
+        const data = await this.loadData();
+        this.data = data;
+
+        const getX = (d) => new Date(d[this.xColumn]);
+        const getY = (d) => parseFloat(d[this.yColumn]);
+
+        // Store data accessors for sampling
+        this.getX = getX;
+        this.getY = getY;
+
+        // Determine X domain (manual override or auto-detect)
+        let xDomain;
+        if (this.xDomainOverride) {
+            xDomain = this.xDomainOverride;
+            console.log('XY Plot: Using manual X domain:', xDomain);
+        } else {
+            // Auto-detect from data
+            xDomain = d3.extent(data, getX);
+            console.log('XY Plot: Auto-detected X domain:', xDomain);
+        }
+
+        // Add X axis
         const x = d3.scaleTime()
-            .domain([
-                new Date('1956-01-01T00:00:00Z'),
-                new Date('1995-09-01T00:00:00Z')
-            ])
+            .domain(xDomain)
             .range([0, this.width]);
 
         // Store scales for data sampling
@@ -125,9 +144,22 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
             .attr('transform', `translate(0,${this.height})`)
             .call(d3.axisBottom(x));
 
+        // Determine Y domain (manual override or auto-detect)
+        let yDomain;
+        if (this.yDomainOverride) {
+            yDomain = this.yDomainOverride;
+            console.log('XY Plot: Using manual Y domain:', yDomain);
+        } else {
+            // Auto-detect from data with 5% padding
+            const [yMin, yMax] = d3.extent(data, getY);
+            const yPadding = (yMax - yMin) * 0.05;
+            yDomain = [yMin - yPadding, yMax + yPadding];
+            console.log('XY Plot: Auto-detected Y domain:', yDomain);
+        }
+
         // Add Y axis
         const y = d3.scaleLinear()
-            .domain([50, 250])
+            .domain(yDomain)
             .range([this.height, 0]);
 
         this.yScale = y;
@@ -154,17 +186,6 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
                 .attr('y', lowerBoundary)
                 .attr('height', upperBoundary - lowerBoundary);
         }
-
-        // Load and plot data
-        const data = await this.loadData();
-        this.data = data;
-
-        const getX = (d) => new Date(d[this.xColumn]);
-        const getY = (d) => d[this.yColumn];
-
-        // Store data accessors for sampling
-        this.getX = getX;
-        this.getY = getY;
 
         // Clear recently sampled tracking when data reloads
         this.recentlySampledIndices.clear();
@@ -562,12 +583,31 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
 
         this.svg = svg;
 
-        // Add X axis (time)
+        // Load data first to enable auto-detection
+        const data = await this.loadData();
+        this.data = data;
+
+        const getX = (d) => new Date(d[this.xColumn]);
+        const getY = (d) => parseFloat(d[this.yColumn]);
+
+        // Store data accessors for sampling
+        this.getX = getX;
+        this.getY = getY;
+
+        // Determine X domain (manual override or auto-detect)
+        let xDomain;
+        if (this.xDomainOverride) {
+            xDomain = this.xDomainOverride;
+            console.log('XY Plot: Using manual X domain:', xDomain);
+        } else {
+            // Auto-detect from data
+            xDomain = d3.extent(data, getX);
+            console.log('XY Plot: Auto-detected X domain:', xDomain);
+        }
+
+        // Add X axis
         const x = d3.scaleTime()
-            .domain([
-                new Date('1956-01-01T00:00:00Z'),
-                new Date('1995-09-01T00:00:00Z')
-            ])
+            .domain(xDomain)
             .range([0, this.width]);
 
         // Store scales for data sampling
@@ -578,9 +618,22 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
             .attr('transform', `translate(0,${this.height})`)
             .call(d3.axisBottom(x));
 
+        // Determine Y domain (manual override or auto-detect)
+        let yDomain;
+        if (this.yDomainOverride) {
+            yDomain = this.yDomainOverride;
+            console.log('XY Plot: Using manual Y domain:', yDomain);
+        } else {
+            // Auto-detect from data with 5% padding
+            const [yMin, yMax] = d3.extent(data, getY);
+            const yPadding = (yMax - yMin) * 0.05;
+            yDomain = [yMin - yPadding, yMax + yPadding];
+            console.log('XY Plot: Auto-detected Y domain:', yDomain);
+        }
+
         // Add Y axis
         const y = d3.scaleLinear()
-            .domain([50, 250])
+            .domain(yDomain)
             .range([this.height, 0]);
 
         this.yScale = y;
@@ -607,17 +660,6 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
                 .attr('y', lowerBoundary)
                 .attr('height', upperBoundary - lowerBoundary);
         }
-
-        // Load and plot data
-        const data = await this.loadData();
-        this.data = data;
-
-        const getX = (d) => new Date(d[this.xColumn]);
-        const getY = (d) => d[this.yColumn];
-
-        // Store data accessors for sampling
-        this.getX = getX;
-        this.getY = getY;
 
         // Clear recently sampled tracking when data reloads
         this.recentlySampledIndices.clear();
