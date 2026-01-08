@@ -168,8 +168,8 @@ export class SonofireComposer extends SonofireBase {
         // Regenerate progression in new pool/tonic
         this.generateNewProgression();
 
-        // Update UI to reflect new pool/tonic
-        this.updateProgressionDisplay();
+        // Update full UI to reflect new pool/tonic (including friendly key name)
+        this.render();
     }
 
     /**
@@ -229,6 +229,17 @@ export class SonofireComposer extends SonofireBase {
     }
 
     /**
+     * Determine if we should use flats based on pool key
+     * @param {string} poolKey - Pool key (e.g., "3♭", "2♯")
+     * @returns {boolean} True if flats should be used
+     */
+    shouldUseFlats(poolKey) {
+        // Flat pools (1♭, 2♭, 3♭, 4♭, 5♭) use flat notation
+        // Sharp pools and 0 use sharp notation
+        return poolKey && poolKey.includes('♭');
+    }
+
+    /**
      * Generate probabilistic chord progression based on harmonic function
      * @param {string} poolKey - Pool key (e.g., "3♯")
      * @param {number} startTonicNote - Starting tonic MIDI note
@@ -267,7 +278,10 @@ export class SonofireComposer extends SonofireBase {
         const modeNames = ['ionian', 'dorian', 'phrygian', 'lydian', 'mixolydian', 'aeolian', 'locrian'];
         const modeName = modeNames[modeIndex] || 'ionian';
 
-        console.log(`Composer: Mode for ${harmonicContext.midiToNoteName(startTonicNote)} in pool ${poolKey}: ${modeName} (degree ${modeIndex + 1})`);
+        // Determine if we should use flats for note names
+        const useFlats = this.shouldUseFlats(poolKey);
+
+        console.log(`Composer: Mode for ${harmonicContext.midiToNoteName(startTonicNote, useFlats)} in pool ${poolKey}: ${modeName} (degree ${modeIndex + 1})`);
 
         // Start with degree 1 (relative to our chosen tonic)
         let currentDegree = 1;
@@ -277,9 +291,9 @@ export class SonofireComposer extends SonofireBase {
             // Get chord quality for this degree using the appropriate mode
             const quality = getChordQualityForDegreeInPool(currentDegree, modeName);
 
-            // Create chord object
+            // Create chord object with proper accidental notation
             const chord = {
-                symbol: `${harmonicContext.midiToNoteName(currentTonicNote)}${quality}`,
+                symbol: `${harmonicContext.midiToNoteName(currentTonicNote, useFlats)}${quality}`,
                 root: currentTonicNote,
                 quality: quality,
                 degree: currentDegree,
@@ -446,13 +460,13 @@ export class SonofireComposer extends SonofireBase {
         const nextTonic = this.nextTonicCenter?.root;
 
         // Keyboard layout
-        const pitchClasses = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+        const pitchClasses = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,]// 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
         const noteNames = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
         const isSharp = [false, true, false, true, false, false, true, false, true, false, true, false];
 
         const keyWidth = 30;
         const keyHeight = 60;
-        const svgWidth = keyWidth * 12;
+        const svgWidth = keyWidth * 24;
         const svgHeight = 100;
 
         let svg = `<svg width="${svgWidth}" height="${svgHeight}" style="background: #1e1e1e;">`;
@@ -461,10 +475,10 @@ export class SonofireComposer extends SonofireBase {
         let naturalCount = -1;
         let rootSvg = "";
         pitchClasses.forEach((pc, i) => {
-            if(!isSharp[i]){ naturalCount += 1 }
-            const x = naturalCount * keyWidth + (isSharp[i]?0.6*keyWidth:0);
-            const y = isSharp[i] ? 10 : 30;  // Sharps offset upward
-            const inPool = poolPitchClasses.includes(pc);
+            if(!isSharp[i%12]){ naturalCount += 1 }
+            const x = naturalCount * keyWidth + (isSharp[i%12]?0.6*keyWidth:0);
+            const y = isSharp[i%12] ? 5 : 20;  // Sharps offset upward
+            const inPool = poolPitchClasses.includes(pc%12);
             const inCurrentChord = currentChordPitchClasses.includes(pc);
             const inNextChord = nextChordPitchClasses.includes(pc);
 
@@ -487,7 +501,7 @@ export class SonofireComposer extends SonofireBase {
 
             let keySvg = "";
             // Draw key rectangle
-            keySvg += `<rect x="${x}" y="${y}" width="${isSharp[i] ? (keyWidth * 0.75 - 2):keyWidth - 2}" height="${keyHeight + (!isSharp[i] ? 5 : 0)}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2" rx="3"/>`;
+            keySvg += `<rect x="${x}" y="${y}" width="${isSharp[i%12] ? (keyWidth * 0.75 - 2):keyWidth - 2}" height="${keyHeight + (!isSharp[i%12] ? 17 : 0)}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2" rx="3"/>`;
 
             // Draw note label
             //keySvg += `<text x="${x + keyWidth / 2}" y="${y + keyHeight - 10}" text-anchor="middle" fill="#d4d4d4" font-size="12">${noteNames[i]}</text>`;
@@ -495,15 +509,15 @@ export class SonofireComposer extends SonofireBase {
             // Draw tonic indicators (roots)
             if (currentTonic && currentTonic % 12 === pc) {
                 // Green circle with R for current root
-                rootSvg += `<circle cx="${x + keyWidth/2}" cy="${y + 45 + (isSharp[i] ? 0 : 7)}" r="10" fill="#ffcc00" opacity="0.9" stroke="#000" stroke-width="1"/>`;
-                rootSvg += `<text x="${x + keyWidth/2}" y="${y + 48.5 + (isSharp[i] ? 0 : 7)}" text-anchor="middle" fill="#000" font-size="10" font-weight="bold">R</text>`;
+                rootSvg += `<circle cx="${x + keyWidth/2}" cy="${y + 45 + (isSharp[i%12] ? 0 : 17)}" r="10" fill="#ffcc00" opacity="0.9" stroke="#000" stroke-width="1"/>`;
+                rootSvg += `<text x="${x + keyWidth/2}" y="${y + 48.5 + (isSharp[i%12] ? 0 : 17)}" text-anchor="middle" fill="#000" font-size="10" font-weight="bold">R</text>`;
             }
             /*if (nextTonic && nextTonic % 12 === pc && nextTonic % 12 !== currentTonic % 12) {
                 // Blue arrow for next root (only if different from current)
                 keySvg += `<circle cx="${x + keyWidth/2}" cy="${y + 40}" r="8" fill="#0080ff" opacity="0.8"/>`;
                 keySvg += `<text x="${x + keyWidth/2}" y="${y + 45}" text-anchor="middle" fill="#fff" font-size="10" font-weight="bold">→</text>`;
             }*/
-            if(isSharp[i]){
+            if(isSharp[i%12]){
                 sharpSvg += keySvg;
             } else {
                 svg += keySvg;
