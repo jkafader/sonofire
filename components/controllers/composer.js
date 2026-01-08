@@ -450,15 +450,19 @@ export class SonofireComposer extends SonofireBase {
         const noteNames = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
         const isSharp = [false, true, false, true, false, false, true, false, true, false, true, false];
 
-        const keyWidth = 50;
+        const keyWidth = 30;
         const keyHeight = 60;
         const svgWidth = keyWidth * 12;
         const svgHeight = 100;
 
         let svg = `<svg width="${svgWidth}" height="${svgHeight}" style="background: #1e1e1e;">`;
+        let sharpSvg = '';
 
+        let naturalCount = -1;
+        let rootSvg = "";
         pitchClasses.forEach((pc, i) => {
-            const x = i * keyWidth;
+            if(!isSharp[i]){ naturalCount += 1 }
+            const x = naturalCount * keyWidth + (isSharp[i]?0.6*keyWidth:0);
             const y = isSharp[i] ? 10 : 30;  // Sharps offset upward
             const inPool = poolPitchClasses.includes(pc);
             const inCurrentChord = currentChordPitchClasses.includes(pc);
@@ -466,40 +470,49 @@ export class SonofireComposer extends SonofireBase {
 
             // Colors based on state
             let fillColor;
-            if (inCurrentChord) {
+            /*if (inCurrentChord) {
                 fillColor = '#00cc88'; // Bright green for current chord notes
-            } else if (inPool) {
+            } else*/ if (inPool) {
                 fillColor = '#4ec9b0'; // Cyan for pool notes not in chord
             } else {
                 fillColor = '#3c3c3c'; // Dark gray for unavailable notes
             }
 
             // Add subtle highlight for next chord notes
-            if (inNextChord && !inCurrentChord) {
+            /*if (inNextChord && !inCurrentChord) {
                 fillColor = '#5588cc'; // Blue tint for next chord notes
-            }
+            }*/
 
             const strokeColor = '#1e1e1e';
 
+            let keySvg = "";
             // Draw key rectangle
-            svg += `<rect x="${x}" y="${y}" width="${keyWidth - 2}" height="${keyHeight}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2" rx="3"/>`;
+            keySvg += `<rect x="${x}" y="${y}" width="${isSharp[i] ? (keyWidth * 0.75 - 2):keyWidth - 2}" height="${keyHeight + (!isSharp[i] ? 5 : 0)}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2" rx="3"/>`;
 
             // Draw note label
-            svg += `<text x="${x + keyWidth/2}" y="${y + keyHeight - 10}" text-anchor="middle" fill="#d4d4d4" font-size="12">${noteNames[i]}</text>`;
+            //keySvg += `<text x="${x + keyWidth / 2}" y="${y + keyHeight - 10}" text-anchor="middle" fill="#d4d4d4" font-size="12">${noteNames[i]}</text>`;
 
             // Draw tonic indicators (roots)
             if (currentTonic && currentTonic % 12 === pc) {
                 // Green circle with R for current root
-                svg += `<circle cx="${x + keyWidth/2}" cy="${y + 15}" r="10" fill="#ffcc00" opacity="0.9" stroke="#000" stroke-width="1"/>`;
-                svg += `<text x="${x + keyWidth/2}" y="${y + 20}" text-anchor="middle" fill="#000" font-size="10" font-weight="bold">R</text>`;
+                rootSvg += `<circle cx="${x + keyWidth/2}" cy="${y + 45 + (isSharp[i] ? 0 : 7)}" r="10" fill="#ffcc00" opacity="0.9" stroke="#000" stroke-width="1"/>`;
+                rootSvg += `<text x="${x + keyWidth/2}" y="${y + 48.5 + (isSharp[i] ? 0 : 7)}" text-anchor="middle" fill="#000" font-size="10" font-weight="bold">R</text>`;
             }
-            if (nextTonic && nextTonic % 12 === pc && nextTonic % 12 !== currentTonic % 12) {
+            /*if (nextTonic && nextTonic % 12 === pc && nextTonic % 12 !== currentTonic % 12) {
                 // Blue arrow for next root (only if different from current)
-                svg += `<circle cx="${x + keyWidth/2}" cy="${y + 40}" r="8" fill="#0080ff" opacity="0.8"/>`;
-                svg += `<text x="${x + keyWidth/2}" y="${y + 45}" text-anchor="middle" fill="#fff" font-size="10" font-weight="bold">→</text>`;
+                keySvg += `<circle cx="${x + keyWidth/2}" cy="${y + 40}" r="8" fill="#0080ff" opacity="0.8"/>`;
+                keySvg += `<text x="${x + keyWidth/2}" y="${y + 45}" text-anchor="middle" fill="#fff" font-size="10" font-weight="bold">→</text>`;
+            }*/
+            if(isSharp[i]){
+                sharpSvg += keySvg;
+            } else {
+                svg += keySvg;
             }
         });
 
+        // render sharps 'on top' of naturals
+        svg += sharpSvg;
+        svg += rootSvg;
         svg += '</svg>';
         return svg;
     }
@@ -594,9 +607,8 @@ export class SonofireComposer extends SonofireBase {
                 <!-- Piano Keyboard Grid -->
                 <div style="margin-bottom: 15px; padding: 10px; background: #1e1e1e; border-radius: 4px; overflow-x: auto;">
                     <div style="margin-bottom: 5px; font-size: 0.9em; color: #888;">
-                        <span style="display: inline-block; width: 12px; height: 12px; background: #00cc88; border-radius: 2px; vertical-align: middle;"></span> Current Chord
-                        <span style="margin-left: 10px; display: inline-block; width: 12px; height: 12px; background: #5588cc; border-radius: 2px; vertical-align: middle;"></span> Next Chord
-                        <span style="margin-left: 10px; display: inline-block; width: 12px; height: 12px; background: #ffcc00; border-radius: 50%; vertical-align: middle;"></span> Root
+                        <span style="display: inline-block; width: 12px; height: 12px; background: #00cc88; border-radius: 2px; vertical-align: middle;"></span> Current Pool
+                        <span style="margin-left: 10px; display: inline-block; width: 12px; height: 12px; background: #ffcc00; border-radius: 50%; vertical-align: middle;"></span> Current Chord Root
                         <span style="margin-left: 15px; color: #569cd6; font-weight: bold;">${friendlyKeyName}</span>
                         <span style="margin-left: 5px; color: #666; font-size: 0.85em;">(${this.poolKey || '0'}/${this.tonicName || 'C'})</span>
                     </div>
