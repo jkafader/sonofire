@@ -611,7 +611,6 @@ export class SonofireDrummer extends BaseInstrumentalist {
         // Subscribe to mood changes (drummer is primary responder)
         this.subscribe('context:mood', (data) => {
             this.mood = data.mood;
-            console.log(`Drummer: Mood changed to ${this.mood}, selecting groove`);
             this.selectGroove();
             this.renderThrottled(); // Use throttled render to prevent jitter
         });
@@ -619,7 +618,6 @@ export class SonofireDrummer extends BaseInstrumentalist {
         // Subscribe to density changes (drummer is primary responder)
         this.subscribe('context:density', (data) => {
             this.density = data.density;
-            console.log(`Drummer: Density changed to ${this.density.toFixed(2)}`);
             this.selectGroove();
             this.renderThrottled(); // Use throttled render to prevent jitter
         });
@@ -628,7 +626,6 @@ export class SonofireDrummer extends BaseInstrumentalist {
         this.subscribe('context:timeSignature', (data) => {
             this.timeSignature = data.timeSignature;
             this.sixteenthsPerBar = data.sixteenthsPerBar;
-            console.log(`Drummer: Time signature changed to ${this.timeSignature} (${this.sixteenthsPerBar} sixteenths per bar)`);
             this.selectGroove(); // Regenerate pattern for new time signature
             this.renderThrottled();
         });
@@ -756,8 +753,6 @@ export class SonofireDrummer extends BaseInstrumentalist {
 
         // Generate pattern based on current density and style
         this.currentPattern = this.generatePatternFromDensity();
-
-        console.log(`Drummer: Generated ${this.drumStyle} pattern for ${this.timeSignature} at density ${this.density.toFixed(2)}`);
     }
 
     /**
@@ -768,7 +763,6 @@ export class SonofireDrummer extends BaseInstrumentalist {
         if (this.styleLayers[styleName]) {
             this.drumStyle = styleName;
             this.selectGroove(); // Regenerate pattern with new style
-            console.log(`Drummer: Style manually set to ${styleName}`);
             this.renderThrottled(); // Use throttled render
         } else {
             console.warn(`Drummer: Unknown style "${styleName}"`);
@@ -787,26 +781,20 @@ export class SonofireDrummer extends BaseInstrumentalist {
      * Handle clock tick - play the locked groove
      */
     handleClockTick(clockData) {
-        //console.log('Drummer handleClockTick called, enabled:', this.enabled, 'data:', clockData);
-
         if (!this.enabled) {
-            console.log('Drummer: Disabled, returning');
             return;
         }
 
         const { tick, ppqn } = clockData;
 
         // Prevent duplicate processing
-        //console.log('Drummer: Checking duplicate tick:', tick, 'lastTick:', this.lastTick);
         if (tick === this.lastTick) {
-            console.log('Drummer: Duplicate tick, returning');
             return;
         }
         this.lastTick = tick;
 
         // Select groove on first tick
         if (!this.currentPattern) {
-            console.log('Drummer: No pattern, selecting groove');
             this.selectGroove();
         }
 
@@ -862,7 +850,6 @@ export class SonofireDrummer extends BaseInstrumentalist {
      */
     playGroove(step) {
         if (!this.currentPattern) {
-            console.log('Drummer: No current pattern!');
             return;
         }
 

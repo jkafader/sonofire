@@ -78,7 +78,6 @@ export class SonofireSoloist extends BaseInstrumentalist {
                 this.maxNote = 73;  // C#5 (1.5 octaves)
         }
 
-        console.log(`Soloist: Range set to ${range} (${this.minNote}-${this.maxNote})`);
         this.render(); // Update UI to reflect new range
     }
 
@@ -119,7 +118,6 @@ export class SonofireSoloist extends BaseInstrumentalist {
         // Subscribe to next chord for phrase planning
         this.subscribe('music:nextChord', (data) => {
             this.nextChord = data;
-            console.log('Soloist: Received next chord:', data.chord);
         });
 
         // Detect bound playhead and subscribe to its lookahead
@@ -128,7 +126,6 @@ export class SonofireSoloist extends BaseInstrumentalist {
         // Listen for new bindings being created
         this.subscribe('whip:binding:register', (data) => {
             if (data.targetComponentId === this.id && data.targetParameterId === 'noteGeneration') {
-                console.log('Soloist: New binding detected to noteGeneration parameter');
                 this.detectAndSubscribeToBoundPlayhead();
             }
         });
@@ -154,17 +151,11 @@ export class SonofireSoloist extends BaseInstrumentalist {
         const bindings = WhipManager.getBindingsForTarget(this.id, 'noteGeneration');
 
         if (bindings.length === 0) {
-            console.log('Soloist: No playhead bound to noteGeneration, subscribing to general data:lookahead');
             this.boundPlayheadId = null;
 
             // Subscribe to general lookahead (first playhead)
             this.subscribe('data:lookahead', (data) => {
                 this.lookaheadInfo = data;
-                console.log('Soloist: Received lookahead data (general):', {
-                    playheadId: data.playheadId,
-                    eventCount: data.estimatedEventCount,
-                    trend: data.trend.direction
-                });
             });
             return;
         }
@@ -178,16 +169,11 @@ export class SonofireSoloist extends BaseInstrumentalist {
         }
 
         this.boundPlayheadId = playheadId;
-        console.log(`Soloist: Bound to playhead ${playheadId}, subscribing to data:lookahead:${playheadId}`);
 
         // Subscribe to specific playhead's lookahead topic
         const topic = `data:lookahead:${playheadId}`;
         this.subscribe(topic, (data) => {
             this.lookaheadInfo = data;
-            console.log(`Soloist: Received lookahead data from playhead ${playheadId}:`, {
-                eventCount: data.estimatedEventCount,
-                trend: data.trend.direction
-            });
         });
     }
 
@@ -281,7 +267,6 @@ export class SonofireSoloist extends BaseInstrumentalist {
         // Get pool notes for reference - show unique pitch classes only
         const uniquePoolNotes = [...new Set(this.currentScale.map(n => harmonicContext.midiToNoteName(n)))].join(' ');
 
-        console.log(`Soloist [${source}]: ${noteName}${octave} (MIDI ${note}) ${scaleStatus}`);
         if (!inScale) {
             console.warn(`  ⚠️  Current pool (${this.poolKey || 'unknown'}): ${uniquePoolNotes}`);
             console.warn(`  ⚠️  Scale length: ${this.currentScale.length}, Scale notes:`, this.currentScale);
@@ -308,7 +293,6 @@ export class SonofireSoloist extends BaseInstrumentalist {
         setTimeout(() => {
             this.currentPhrase = this.generatePhrase();
             this.phraseIndex = 0;
-            console.log(`Soloist: Generated phrase with ${this.currentPhrase?.length || 0} notes`);
         }, 150); // Wait 150ms for all context to arrive
     }
 
@@ -331,8 +315,6 @@ export class SonofireSoloist extends BaseInstrumentalist {
         const nextChordTones = this.nextChord.voicing || [];
         const poolNotes = this.currentScale || [];
         const trend = this.lookaheadInfo.trend;
-
-        console.log(`Soloist: Generating phrase of length ${phraseLength}, trend: ${trend.direction}`);
 
         // Generate phrase structure
         const phrase = [];
@@ -570,11 +552,6 @@ export class SonofireSoloist extends BaseInstrumentalist {
 
             this.lastNote = phraseNote.note;
             this.phraseIndex++;
-
-            console.log(`Soloist: Playing phrase note ${this.phraseIndex}/${this.currentPhrase.length}`, {
-                note: phraseNote.note,
-                role: phraseNote.harmonicRole
-            });
         } else {
             // Fallback to simple note generation if no phrase available
             console.warn('Soloist: No phrase available, using fallback');
@@ -617,16 +594,10 @@ export class SonofireSoloist extends BaseInstrumentalist {
             this.lastNote = phraseNote.note;
             this.phraseIndex++;
 
-            console.log(`Soloist: Playing phrase note ${this.phraseIndex}/${this.currentPhrase.length}`, {
-                note: phraseNote.note,
-                role: phraseNote.harmonicRole
-            });
-
             return; // Done with phrase-based note
         }
 
         // FALLBACK: Reactive mode if no phrase available
-        console.log('Soloist: Using reactive mode (no phrase)');
 
         // Use the note provided by the visualizer, or generate from value
         let note = data.note;

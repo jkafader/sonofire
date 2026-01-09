@@ -473,7 +473,6 @@ export class SonofireBassist extends BaseInstrumentalist {
         // Use manual rhythm pattern if selected, otherwise use motion type's pattern
         const patternKey = this.rhythmPattern || this.motionType;
         this.currentRhythmPattern = this.generateRhythmPattern(patternKey, this.density);
-        console.log(`Bassist: Generated ${patternKey} pattern for ${this.timeSignature} at density ${this.density.toFixed(2)}`);
     }
 
     /**
@@ -941,7 +940,6 @@ export class SonofireBassist extends BaseInstrumentalist {
         // Subscribe to density changes (regenerate rhythm pattern)
         this.subscribe('context:density', (data) => {
             this.density = data.density;
-            console.log(`Bassist: Density changed to ${this.density.toFixed(2)}`);
             this.regenerateRhythmPattern();
             this.renderThrottled(); // Use throttled render to prevent jitter
         });
@@ -950,7 +948,6 @@ export class SonofireBassist extends BaseInstrumentalist {
         this.subscribe('context:timeSignature', (data) => {
             this.timeSignature = data.timeSignature;
             this.sixteenthsPerBar = data.sixteenthsPerBar;
-            console.log(`Bassist: Time signature changed to ${this.timeSignature} (${this.sixteenthsPerBar} sixteenths per bar)`);
             this.regenerateRhythmPattern(); // Regenerate pattern for new time signature
             this.renderThrottled();
         });
@@ -1104,7 +1101,6 @@ export class SonofireBassist extends BaseInstrumentalist {
             const duration = 400;
             this.sendNote(note, velocity, duration);
             this.currentBassNote = note;
-            console.log(`Bassist: Played note ${note} (style: ${this.bassStyle})`);
         }
     }
 
@@ -1429,7 +1425,6 @@ export class SonofireBassist extends BaseInstrumentalist {
         motionTypeSelect.onblur = () => this.endUIInteraction();
         motionTypeSelect.onchange = (e) => {
             this.motionType = e.target.value;
-            console.log(`Bassist: Motion type changed to ${this.motionType}`);
             this.regenerateRhythmPattern();
             this.renderThrottled();
             this.endUIInteraction();
@@ -1441,7 +1436,6 @@ export class SonofireBassist extends BaseInstrumentalist {
         rhythmPatternSelect.onchange = (e) => {
             const value = e.target.value;
             this.rhythmPattern = (value === 'auto') ? null : value;
-            console.log(`Bassist: Rhythm pattern changed to ${this.rhythmPattern || 'auto (motion type)'}`);
             this.regenerateRhythmPattern();
         };
 

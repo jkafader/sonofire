@@ -287,7 +287,6 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
         this.rhythmLayers = this.defineRhythmLayers(this.timeSignature);
 
         this.currentRhythmPattern = this.generateRhythmPattern(this.playingApproach, this.density);
-        console.log(`Keyboardist: Generated ${this.playingApproach} pattern for ${this.timeSignature} at density ${this.density.toFixed(2)}`);
     }
 
     /**
@@ -521,7 +520,6 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
         // Subscribe to density changes
         this.subscribe('context:density', (data) => {
             this.density = data.density;
-            console.log(`Keyboardist: Density changed to ${this.density.toFixed(2)}`);
             this.regenerateRhythmPattern();
             this.renderThrottled(); // Use throttled render to prevent jitter
         });
@@ -530,7 +528,6 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
         this.subscribe('context:timeSignature', (data) => {
             this.timeSignature = data.timeSignature;
             this.sixteenthsPerBar = data.sixteenthsPerBar;
-            console.log(`Keyboardist: Time signature changed to ${this.timeSignature} (${this.sixteenthsPerBar} sixteenths per bar)`);
             this.regenerateRhythmPattern(); // Regenerate pattern for new time signature
             this.renderThrottled();
         });
@@ -793,7 +790,6 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
         instrumentSelect.onblur = () => this.endUIInteraction();
         instrumentSelect.onchange = (e) => {
             this.instrumentStyle = e.target.value;
-            console.log(`Keyboardist: Instrument changed to ${this.instrumentStyle}`);
             this.currentVoicing = this.generateVoicing();  // Regenerate voicing
             this.renderThrottled();
             this.endUIInteraction();
@@ -804,7 +800,6 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
         approachSelect.onblur = () => this.endUIInteraction();
         approachSelect.onchange = (e) => {
             this.playingApproach = e.target.value;
-            console.log(`Keyboardist: Approach changed to ${this.playingApproach}`);
             this.regenerateRhythmPattern();
             this.arpeggioIndex = 0;  // Reset arpeggio
             this.renderThrottled();

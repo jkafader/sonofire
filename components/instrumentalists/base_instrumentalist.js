@@ -62,8 +62,6 @@ export class BaseInstrumentalist extends SonofireBase {
     setupSubscriptions() {
         super.setupSubscriptions();
 
-        console.log(`${this.constructor.name}: Setting up subscriptions...`);
-
         // Subscribe to musical context changes
         this.subscribe('music:chord', (data) => {
             this.handleChordChange(data);
@@ -82,22 +80,11 @@ export class BaseInstrumentalist extends SonofireBase {
             this.density = data.density;
         });
 
-        /*this.subscribe('context:key', (data) => {
-            console.log(`${this.constructor.name}: Received context:key`, data);
-            this.currentKey = data.key;
-            this.currentScale = data.notes || [];
-            console.log(`${this.constructor.name}: Updated currentKey=${this.currentKey}, currentScale has ${this.currentScale.length} notes`);
-        });*/
-
         this.subscribe('context:pool', (data) => {
-            console.log(`${this.constructor.name}: Received context:pool`, data);
             this.poolKey = data.poolKey;
             this.tonicNote = data.tonicNote;
             this.currentScale = data.notes || [];
-            console.log(`${this.constructor.name}: Updated to pool ${this.poolKey}, tonicNote=${this.tonicNote}, scale has ${this.currentScale.length} notes`);
         });
-
-        console.log(`${this.constructor.name}: Subscriptions set up complete`);
     }
 
     /**
@@ -114,22 +101,18 @@ export class BaseInstrumentalist extends SonofireBase {
      * Discover operational modes from PubSub last signals
      */
     discoverOperationalModes() {
-        console.log(`${this.constructor.name}: Discovering operational modes...`);
-
         // Discover pool/tonic (preferred)
         const poolContext = this.getLastValue('context:pool');
         if (poolContext) {
             this.poolKey = poolContext.poolKey;
             this.tonicNote = poolContext.tonicNote;
             this.currentScale = poolContext.notes || [];
-            console.log(`${this.constructor.name}: Found pool ${this.poolKey}`);
         } else {
             // Fall back to legacy key context
             const keyContext = this.getLastValue('context:key');
             if (keyContext) {
                 this.currentKey = keyContext.key;
                 this.currentScale = keyContext.notes || [];
-                console.log(`${this.constructor.name}: Found key ${this.currentKey}`);
             }
         }
 
@@ -137,21 +120,18 @@ export class BaseInstrumentalist extends SonofireBase {
         const chordContext = this.getLastValue('music:chord');
         if (chordContext) {
             this.currentChord = chordContext;
-            console.log(`${this.constructor.name}: Found chord ${chordContext.chord}`);
         }
 
         // Discover mood
         const moodContext = this.getLastValue('context:mood');
         if (moodContext) {
             this.mood = moodContext.mood;
-            console.log(`${this.constructor.name}: Found mood ${this.mood}`);
         }
 
         // Discover density
         const densityContext = this.getLastValue('context:density');
         if (densityContext) {
             this.density = densityContext.density;
-            console.log(`${this.constructor.name}: Found density ${this.density.toFixed(2)}`);
         }
     }
 
@@ -160,7 +140,6 @@ export class BaseInstrumentalist extends SonofireBase {
      */
     handleChordChange(chordData) {
         this.currentChord = chordData;
-        console.log(`${this.constructor.name}: Chord changed to ${chordData.chord}`);
     }
 
     /**
@@ -209,7 +188,6 @@ export class BaseInstrumentalist extends SonofireBase {
      */
     toggleMute() {
         this.muted = !this.muted;
-        console.log(`${this.constructor.name}: ${this.muted ? 'Muted' : 'Unmuted'}`);
         this.render(); // Update UI to show new state
     }
 
@@ -218,7 +196,6 @@ export class BaseInstrumentalist extends SonofireBase {
      */
     toggleDebug() {
         this.debug = !this.debug;
-        console.log(`${this.constructor.name}: Debug ${this.debug ? 'ON' : 'OFF'}`);
         this.render(); // Update UI to show new state
     }
 
@@ -314,7 +291,6 @@ export class BaseInstrumentalist extends SonofireBase {
      */
     setChannel(channel) {
         this.channel = Math.max(0, Math.min(15, channel));
-        console.log(`${this.constructor.name}: Channel set to ${this.channel + 1}`);
     }
 
     /**
