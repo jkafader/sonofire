@@ -18,6 +18,7 @@ export class SonofireConductor extends SonofireBase {
         this.tempo = 120;
         this.mood = 'relaxed'; // 'tense' | 'relaxed' | 'sparse' | 'dense'
         this.density = 0.5; // 0.0 (sparse) → 1.0 (full/dense)
+        this.timeSignature = '4/4'; // '2/4' | '3/4' | '4/4' | '5/4' | '6/8'
 
         // Pool/tonic notation (new system)
         this.poolKey = null;     // e.g., "3♯", "0", "2♭"
@@ -35,7 +36,8 @@ export class SonofireConductor extends SonofireBase {
             'data-pool',
             'data-tonic',
             'data-tempo',
-            'data-mode'
+            'data-mode',
+            'data-time-signature'
         ];
     }
 
@@ -55,6 +57,7 @@ export class SonofireConductor extends SonofireBase {
 
         this.tempo = parseInt(this.getAttribute('data-tempo')) || 120;
         this.mode = this.getAttribute('data-mode') || 'manual';
+        this.timeSignature = this.getAttribute('data-time-signature') || '4/4';
     }
 
     /**
@@ -103,11 +106,6 @@ export class SonofireConductor extends SonofireBase {
                 this.setDensity(value);
             }
         });
-
-        // Render target lights after component is fully rendered
-        requestAnimationFrame(() => {
-            this.renderTargetLights();
-        });
     }
 
     /**
@@ -130,9 +128,10 @@ export class SonofireConductor extends SonofireBase {
             this.setPoolAndTonic(poolKey, tonicName);
         }
 
-        // Publish initial mood and density
+        // Publish initial mood, density, and time signature
         this.setMood(this.mood);
         this.setDensity(this.density);
+        this.setTimeSignature(this.timeSignature);
 
         // Register whippable parameters (after render)
         this.registerWhippableParameters();
@@ -295,6 +294,35 @@ export class SonofireConductor extends SonofireBase {
     }
 
     /**
+     * Set the time signature
+     */
+    setTimeSignature(timeSignature) {
+        this.timeSignature = timeSignature;
+
+        // Parse time signature to get beats and note value
+        const [beatsPerBar, noteValue] = timeSignature.split('/').map(n => parseInt(n));
+
+        // Calculate sixteenths per bar (varies by time signature)
+        let sixteenthsPerBar;
+        if (noteValue === 8 && beatsPerBar === 6) {
+            // 6/8 time: 2 dotted quarter beats, 12 sixteenth notes per bar
+            sixteenthsPerBar = 12;
+        } else {
+            // Standard time signatures: beatsPerBar * 4 sixteenths
+            sixteenthsPerBar = beatsPerBar * 4;
+        }
+
+        this.publish('context:timeSignature', {
+            timeSignature,
+            beatsPerBar,
+            noteValue,
+            sixteenthsPerBar
+        });
+
+        console.log(`Conductor: Time signature set to ${timeSignature} (${sixteenthsPerBar} sixteenths per bar)`);
+    }
+
+    /**
      * Start the MIDI Clock
      */
     startClock() {
@@ -401,9 +429,15 @@ export class SonofireConductor extends SonofireBase {
                 </details>
 
                 <div style="margin-bottom: 10px;">
-                    <strong>Tempo:</strong>
+                    <strong>Tempo ${this.getTargetLightHTML('tempo')}:</strong>
                     <input type="number" id="tempo-input" value="${this.tempo}" min="40" max="240" style="width: 60px;">
                     <span>BPM</span>
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>Time Signature:</strong>
+                    <select id="time-signature-select">
+                        ${this.renderTimeSignatureOptions()}
+                    </select>
                 </div>
                 <div style="margin-bottom: 10px;">
                     <strong>Transport:</strong>
@@ -421,7 +455,7 @@ export class SonofireConductor extends SonofireBase {
                     </select>
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <strong>Density:</strong>
+                    <strong>Density ${this.getTargetLightHTML('density')}:</strong>
                     <input type="range" id="density-slider" min="0" max="100" value="${this.density * 100}" style="width: 200px;">
                     <span id="density-value">${this.density.toFixed(2)}</span>
                 </div>
@@ -435,10 +469,8 @@ export class SonofireConductor extends SonofireBase {
 
         this.setupEventHandlers();
 
-        // Re-render target lights after DOM update
-        requestAnimationFrame(() => {
-            this.renderTargetLights();
-        });
+        // Sync target light colors with existing bindings
+        this.syncTargetLightColors();
     }
 
     /**
@@ -514,6 +546,10 @@ export class SonofireConductor extends SonofireBase {
             this.setTempo(parseInt(e.target.value));
         };
 
+        this.$('#time-signature-select').onchange = (e) => {
+            this.setTimeSignature(e.target.value);
+        };
+
         this.$('#play-btn').onclick = () => {
             this.play();
         };
@@ -572,6 +608,13 @@ export class SonofireConductor extends SonofireBase {
         const moods = ['relaxed', 'tense', 'sparse', 'dense'];
         return moods.map(m =>
             `<option value="${m}" ${m === this.mood ? 'selected' : ''}>${m}</option>`
+        ).join('');
+    }
+
+    renderTimeSignatureOptions() {
+        const timeSignatures = ['2/4', '3/4', '4/4', '5/4', '6/8'];
+        return timeSignatures.map(ts =>
+            `<option value="${ts}" ${ts === this.timeSignature ? 'selected' : ''}>${ts}</option>`
         ).join('');
     }
 

@@ -15,6 +15,8 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
         this.channel = 4;                     // MIDI channel 4
         this.instrumentStyle = 'piano';       // 'organ', 'piano', 'vibraphone', 'harpsichord'
         this.playingApproach = 'comping';     // 'arpeggio', 'block', 'comping'
+        this.timeSignature = '4/4';           // '2/4', '3/4', '4/4', '5/4', '6/8'
+        this.sixteenthsPerBar = 16;           // Calculated from time signature
 
         // Note range settings
         this.minNote = 48;                    // C3
@@ -43,7 +45,7 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
         // Define instrument styles, approaches, and rhythm layers
         this.instrumentStyles = this.defineInstrumentStyles();
         this.playingApproaches = this.definePlayingApproaches();
-        this.rhythmLayers = this.defineRhythmLayers();
+        this.rhythmLayers = this.defineRhythmLayers(this.timeSignature);
 
         // Initialize rhythm pattern
         this.regenerateRhythmPattern();
@@ -123,9 +125,20 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
 
     /**
      * Define rhythm layers for different playing approaches
-     * Pattern: 16 positions (4 beats × 4 sixteenths)
+     * Adapted to current time signature
+     * @param {string} timeSignature - Time signature ('2/4', '3/4', '4/4', '5/4', '6/8')
      */
-    defineRhythmLayers() {
+    defineRhythmLayers(timeSignature = '4/4') {
+        const patterns4_4 = this.getBase4_4RhythmPatterns();
+        return this.adaptPatternsToTimeSignature(patterns4_4, timeSignature);
+    }
+
+    /**
+     * Get base 4/4 rhythm patterns (all approaches)
+     * Pattern: 16 positions (4 beats × 4 sixteenths)
+     * @returns {object} Rhythm patterns for 4/4 time
+     */
+    getBase4_4RhythmPatterns() {
         return {
             // Arpeggio rhythm - continuous flowing patterns
             arpeggio: {
@@ -190,6 +203,45 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
     }
 
     /**
+     * Adapt 4/4 patterns to different time signatures
+     */
+    adaptPatternsToTimeSignature(patterns4_4, timeSignature) {
+        if (timeSignature === '4/4') return patterns4_4;
+
+        const adapted = {};
+        for (const [approachName, approachData] of Object.entries(patterns4_4)) {
+            adapted[approachName] = {
+                base: this.adaptRhythmObject(approachData.base, timeSignature),
+                layers: approachData.layers.map(layer => ({
+                    threshold: layer.threshold,
+                    ...this.adaptRhythmObject(layer, timeSignature)
+                }))
+            };
+        }
+        return adapted;
+    }
+
+    adaptRhythmObject(rhythmObj, timeSignature) {
+        const adapted = {};
+        for (const [key, array] of Object.entries(rhythmObj)) {
+            if (key === 'threshold') continue;
+            if (!Array.isArray(array)) continue;
+            adapted[key] = this.adaptSingleArray(array, timeSignature);
+        }
+        return adapted;
+    }
+
+    adaptSingleArray(array, timeSignature) {
+        switch (timeSignature) {
+            case '2/4': return array.slice(0, 8);
+            case '3/4': return array.slice(0, 12);
+            case '5/4': return [...array, ...array.slice(0, 4)];
+            case '6/8': return array.slice(0, 12);
+            default: return array;
+        }
+    }
+
+    /**
      * Generate rhythm pattern from approach and density
      * @param {string} approach - Playing approach key
      * @param {number} density - Density value (0-1)
@@ -231,8 +283,11 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
      * Regenerate rhythm pattern based on current approach and density
      */
     regenerateRhythmPattern() {
+        // Regenerate rhythm layers for current time signature
+        this.rhythmLayers = this.defineRhythmLayers(this.timeSignature);
+
         this.currentRhythmPattern = this.generateRhythmPattern(this.playingApproach, this.density);
-        console.log(`Keyboardist: Generated ${this.playingApproach} pattern at density ${this.density.toFixed(2)}`);
+        console.log(`Keyboardist: Generated ${this.playingApproach} pattern for ${this.timeSignature} at density ${this.density.toFixed(2)}`);
     }
 
     /**
@@ -470,6 +525,15 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
             this.regenerateRhythmPattern();
             this.renderThrottled(); // Use throttled render to prevent jitter
         });
+
+        // Subscribe to time signature changes
+        this.subscribe('context:timeSignature', (data) => {
+            this.timeSignature = data.timeSignature;
+            this.sixteenthsPerBar = data.sixteenthsPerBar;
+            console.log(`Keyboardist: Time signature changed to ${this.timeSignature} (${this.sixteenthsPerBar} sixteenths per bar)`);
+            this.regenerateRhythmPattern(); // Regenerate pattern for new time signature
+            this.renderThrottled();
+        });
     }
 
     /**
@@ -515,11 +579,6 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
                 this.regenerateRhythmPattern();
             }
         });
-
-        // Render target lights
-        requestAnimationFrame(() => {
-            this.renderTargetLights();
-        });
     }
 
     /**
@@ -531,11 +590,19 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
 
         const { tick, ppqn } = clockData;
 
-        // Calculate 16th note position in bar
-        const ticksPerBar = ppqn * 4;
+        // Calculate 16th note position in bar (varies by time signature)
+        const [beatsPerBar, noteValue] = this.timeSignature.split('/').map(n => parseInt(n));
+        let quartersPerBar;
+        if (noteValue === 8 && beatsPerBar === 6) {
+            quartersPerBar = 3; // 6/8 time: 3 quarter notes duration
+        } else {
+            quartersPerBar = beatsPerBar;
+        }
+
+        const ticksPerBar = ppqn * quartersPerBar;
         const tickInBar = tick % ticksPerBar;
         const sixteenthNote = ppqn / 4;
-        const position = Math.floor(tickInBar / sixteenthNote);
+        const position = Math.floor(tickInBar / sixteenthNote); // 0 to (sixteenthsPerBar-1)
 
         // Prevent duplicate processing
         if (position === this.lastPosition) return;
@@ -693,13 +760,13 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
                     <select id="approach-select" style="margin: 0 5px;">
                         ${this.renderApproachOptions()}
                     </select>
-                    | Density:
+                    | Density ${this.getTargetLightHTML('density')}:
                     <input type="range" id="density-slider" min="0" max="100" value="${this.density * 100}" style="width: 100px; vertical-align: middle;">
                     <span style="margin-left: 5px;">${Math.round(this.density * 100)}%</span>
                 </span>
                 <br>
                 <span style="margin-left: 10px; color: #888;">
-                    Humanization:
+                    Humanization ${this.getTargetLightHTML('humanization')}:
                     <input type="range" id="humanization-slider" min="0" max="100"
                            value="${Math.round(this.humanizationIntensity * 100)}"
                            style="width: 100px; vertical-align: middle;">
@@ -782,10 +849,8 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
             this.toggleDebug();
         };
 
-        // Re-render target lights
-        requestAnimationFrame(() => {
-            this.renderTargetLights();
-        });
+        // Sync target light colors with existing bindings
+        this.syncTargetLightColors();
     }
 
     /**

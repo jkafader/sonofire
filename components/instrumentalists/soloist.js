@@ -265,11 +265,6 @@ export class SonofireSoloist extends BaseInstrumentalist {
                 this.setNoteRange(ranges[clampedIndex]);
             }
         });
-
-        // Render target lights after component is fully rendered
-        requestAnimationFrame(() => {
-            this.renderTargetLights();
-        });
     }
 
     /**
@@ -814,12 +809,14 @@ export class SonofireSoloist extends BaseInstrumentalist {
                     <select id="channel-select" style="margin: 0 5px;">
                         ${this.renderChannelOptions()}
                     </select>
+                    | Note Gen ${this.getTargetLightHTML('noteGeneration', 'inline')}
+                    | Velocity ${this.getTargetLightHTML('velocity', 'inline')}
                     | Style: ${this.playingStyle}
-                    | Range:
+                    | Range ${this.getTargetLightHTML('noteRange')}:
                     <select id="range-select" style="margin: 0 5px;">
                         ${this.renderRangeOptions()}
                     </select>
-                    | Max Interval:
+                    | Max Interval ${this.getTargetLightHTML('maxInterval')}:
                     <input type="range" id="max-interval-slider" min="0" max="12" value="${this.maxInterval}" style="width: 100px; vertical-align: middle;">
                     <span style="margin-left: 5px;">${this.maxInterval}</span>
                     | <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
@@ -851,10 +848,8 @@ export class SonofireSoloist extends BaseInstrumentalist {
             this.toggleDebug();
         };
 
-        // Re-render target lights after DOM update
-        requestAnimationFrame(() => {
-            this.renderTargetLights();
-        });
+        // Sync target light colors with existing bindings
+        this.syncTargetLightColors();
     }
 
     /**

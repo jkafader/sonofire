@@ -14,6 +14,8 @@ export class SonofireDrummer extends BaseInstrumentalist {
         // Drummer-specific settings
         this.channel = 9;                 // Standard MIDI drum channel
         this.drumStyle = 'rock';          // 'rock', 'jazz', 'funk', 'breakbeat'
+        this.timeSignature = '4/4';       // '2/4', '3/4', '4/4', '5/4', '6/8'
+        this.sixteenthsPerBar = 16;       // Calculated from time signature
 
         // MIDI drum note numbers (General MIDI standard)
         this.drumNotes = {
@@ -65,7 +67,7 @@ export class SonofireDrummer extends BaseInstrumentalist {
         };
 
         // Define style layers for density gradients
-        this.styleLayers = this.defineStyleLayers();
+        this.styleLayers = this.defineStyleLayers(this.timeSignature);
         this.fills = this.defineFills();
     }
 
@@ -73,8 +75,21 @@ export class SonofireDrummer extends BaseInstrumentalist {
      * Define drum style layers with density gradients
      * Each style has a base pattern (minimum density) and layers that add complexity
      * Layers are applied probabilistically based on how far density exceeds their threshold
+     * @param {string} timeSignature - Time signature ('2/4', '3/4', '4/4', '5/4', '6/8')
      */
-    defineStyleLayers() {
+    defineStyleLayers(timeSignature = '4/4') {
+        // Get base 4/4 patterns
+        const patterns4_4 = this.getBase4_4Patterns();
+
+        // Adapt patterns to requested time signature
+        return this.adaptPatternsToTimeSignature(patterns4_4, timeSignature);
+    }
+
+    /**
+     * Get base 4/4 patterns (all styles)
+     * @returns {object} Style patterns for 4/4 time
+     */
+    getBase4_4Patterns() {
         return {
             rock: {
                 base: {
@@ -246,6 +261,82 @@ export class SonofireDrummer extends BaseInstrumentalist {
                 ]
             }
         };
+    }
+
+    /**
+     * Adapt 4/4 patterns to different time signatures
+     * @param {object} patterns4_4 - Base 4/4 patterns
+     * @param {string} timeSignature - Target time signature
+     * @returns {object} Adapted patterns
+     */
+    adaptPatternsToTimeSignature(patterns4_4, timeSignature) {
+        if (timeSignature === '4/4') {
+            return patterns4_4; // No adaptation needed
+        }
+
+        const adapted = {};
+
+        for (const [styleName, styleData] of Object.entries(patterns4_4)) {
+            adapted[styleName] = {
+                base: this.adaptPatternObject(styleData.base, timeSignature),
+                layers: styleData.layers.map(layer => ({
+                    threshold: layer.threshold,
+                    ...this.adaptPatternObject(layer, timeSignature)
+                }))
+            };
+        }
+
+        return adapted;
+    }
+
+    /**
+     * Adapt a single pattern object (containing drum voice arrays) to a time signature
+     * @param {object} patternObj - Object with drum voice arrays (kick, snare, hihat, etc.)
+     * @param {string} timeSignature - Target time signature
+     * @returns {object} Adapted pattern object
+     */
+    adaptPatternObject(patternObj, timeSignature) {
+        const adapted = {};
+
+        for (const [voice, pattern] of Object.entries(patternObj)) {
+            if (voice === 'threshold') continue; // Skip metadata
+            if (!Array.isArray(pattern)) continue; // Skip non-array properties
+
+            adapted[voice] = this.adaptSinglePattern(pattern, timeSignature);
+        }
+
+        return adapted;
+    }
+
+    /**
+     * Adapt a single drum voice pattern array to a time signature
+     * @param {number[]} pattern - 16-element pattern array for 4/4 time
+     * @param {string} timeSignature - Target time signature
+     * @returns {number[]} Adapted pattern array
+     */
+    adaptSinglePattern(pattern, timeSignature) {
+        switch (timeSignature) {
+            case '2/4':
+                // Take first 2 beats (8 sixteenths)
+                return pattern.slice(0, 8);
+
+            case '3/4':
+                // Take first 3 beats (12 sixteenths)
+                return pattern.slice(0, 12);
+
+            case '5/4':
+                // Extend with an extra beat (20 sixteenths total)
+                // Copy first beat to create 5th beat
+                return [...pattern, ...pattern.slice(0, 4)];
+
+            case '6/8':
+                // 6/8 feels like 2 dotted-quarter beats (12 sixteenths)
+                // Take first 12 steps but shift accents for compound meter feel
+                return pattern.slice(0, 12);
+
+            default:
+                return pattern; // Fallback to 4/4
+        }
     }
 
     /**
@@ -532,6 +623,15 @@ export class SonofireDrummer extends BaseInstrumentalist {
             this.selectGroove();
             this.renderThrottled(); // Use throttled render to prevent jitter
         });
+
+        // Subscribe to time signature changes
+        this.subscribe('context:timeSignature', (data) => {
+            this.timeSignature = data.timeSignature;
+            this.sixteenthsPerBar = data.sixteenthsPerBar;
+            console.log(`Drummer: Time signature changed to ${this.timeSignature} (${this.sixteenthsPerBar} sixteenths per bar)`);
+            this.selectGroove(); // Regenerate pattern for new time signature
+            this.renderThrottled();
+        });
     }
 
     /**
@@ -601,11 +701,6 @@ export class SonofireDrummer extends BaseInstrumentalist {
                 this.swingAmount = value;
             }
         });
-
-        // Render target lights after component is fully rendered
-        requestAnimationFrame(() => {
-            this.renderTargetLights();
-        });
     }
 
     /**
@@ -656,10 +751,13 @@ export class SonofireDrummer extends BaseInstrumentalist {
      * Generates pattern dynamically using density gradient
      */
     selectGroove() {
+        // Regenerate style layers for current time signature
+        this.styleLayers = this.defineStyleLayers(this.timeSignature);
+
         // Generate pattern based on current density and style
         this.currentPattern = this.generatePatternFromDensity();
 
-        console.log(`Drummer: Generated ${this.drumStyle} pattern at density ${this.density.toFixed(2)}`);
+        console.log(`Drummer: Generated ${this.drumStyle} pattern for ${this.timeSignature} at density ${this.density.toFixed(2)}`);
     }
 
     /**
@@ -712,11 +810,21 @@ export class SonofireDrummer extends BaseInstrumentalist {
             this.selectGroove();
         }
 
-        // Calculate position in bar
-        const ticksPerBar = ppqn * 4; // 4/4 time
+        // Calculate position in bar (varies by time signature)
+        const [beatsPerBar, noteValue] = this.timeSignature.split('/').map(n => parseInt(n));
+        let quartersPerBar;
+        if (noteValue === 8 && beatsPerBar === 6) {
+            // 6/8 time: 6 eighth notes = 3 quarter notes duration
+            quartersPerBar = 3;
+        } else {
+            // Standard time signatures: beatsPerBar quarter notes
+            quartersPerBar = beatsPerBar;
+        }
+
+        const ticksPerBar = ppqn * quartersPerBar;
         const tickInBar = tick % ticksPerBar;
         const sixteenthNote = ppqn / 4;
-        const stepInBar = Math.floor(tickInBar / sixteenthNote); // 0-15
+        const stepInBar = Math.floor(tickInBar / sixteenthNote); // 0 to (sixteenthsPerBar-1)
 
         //console.log('Drummer: Calculated step:', stepInBar, 'lastStep:', this.lastStep);
 
@@ -970,13 +1078,13 @@ export class SonofireDrummer extends BaseInstrumentalist {
                 </span>
                 <br>
                 <span style="margin-left: 10px; color: #888;">
-                    Humanization:
+                    Humanization ${this.getTargetLightHTML('humanization')}:
                     <input type="range" id="humanization-slider" min="0" max="100"
                            value="${Math.round(this.humanizationIntensity * 100)}"
                            style="width: 100px; vertical-align: middle;">
                     <span id="humanization-value">${Math.round(this.humanizationIntensity * 100)}%</span>
                     | <button id="humanization-toggle" style="padding: 2px 8px; margin: 0 5px;">${this.humanizationEnabled ? '🎭 Human' : '🤖 Robot'}</button>
-                    | Swing:
+                    | Swing ${this.getTargetLightHTML('swing')}:
                     <input type="range" id="swing-slider" min="0" max="100"
                            value="${Math.round(this.swingAmount * 100)}"
                            style="width: 100px; vertical-align: middle;">
@@ -1057,10 +1165,8 @@ export class SonofireDrummer extends BaseInstrumentalist {
             };
         }
 
-        // Re-render target lights after DOM update
-        requestAnimationFrame(() => {
-            this.renderTargetLights();
-        });
+        // Sync target light colors with existing bindings
+        this.syncTargetLightColors();
     }
 }
 

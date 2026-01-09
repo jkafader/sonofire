@@ -16,6 +16,8 @@ export class SonofireBassist extends BaseInstrumentalist {
         this.channel = 1;                 // MIDI channel 1 for plucked string synthesis
         this.motionType = 'root-5th';     // Current motion type (root-only, root-5th, shell, etc.)
         this.rhythmPattern = null;        // Manual rhythm pattern selection (null = use motion type's pattern)
+        this.timeSignature = '4/4';       // '2/4', '3/4', '4/4', '5/4', '6/8'
+        this.sixteenthsPerBar = 16;       // Calculated from time signature
 
         // Note range settings - FIXED to first 3 bass strings (E1, A1, D2) up to 12th fret
         this.minNote = 28;                // E1 (first string open)
@@ -47,7 +49,7 @@ export class SonofireBassist extends BaseInstrumentalist {
 
         // Define motion types and rhythm layers
         this.motionTypes = this.defineMotionTypes();
-        this.rhythmLayers = this.defineRhythmLayers();
+        this.rhythmLayers = this.defineRhythmLayers(this.timeSignature);
 
         // Initialize rhythm pattern
         this.regenerateRhythmPattern();
@@ -148,10 +150,24 @@ export class SonofireBassist extends BaseInstrumentalist {
     /**
      * Define rhythm layers for each motion type
      * Each has a base pattern + density layers
+     * Adapted to current time signature
+     * @param {string} timeSignature - Time signature ('2/4', '3/4', '4/4', '5/4', '6/8')
+     */
+    defineRhythmLayers(timeSignature = '4/4') {
+        // Get base 4/4 patterns
+        const patterns4_4 = this.getBase4_4RhythmPatterns();
+
+        // Adapt patterns to requested time signature
+        return this.adaptPatternsToTimeSignature(patterns4_4, timeSignature);
+    }
+
+    /**
+     * Get base 4/4 rhythm patterns (all motion types)
      * Pattern: 16 positions (4 beats × 4 sixteenths)
      * Velocity: 0-127 per position
+     * @returns {object} Rhythm patterns for 4/4 time
      */
-    defineRhythmLayers() {
+    getBase4_4RhythmPatterns() {
         return {
             'root-only': {
                 base: {
@@ -332,6 +348,81 @@ export class SonofireBassist extends BaseInstrumentalist {
     }
 
     /**
+     * Adapt 4/4 patterns to different time signatures
+     * @param {object} patterns4_4 - Base 4/4 patterns
+     * @param {string} timeSignature - Target time signature
+     * @returns {object} Adapted patterns
+     */
+    adaptPatternsToTimeSignature(patterns4_4, timeSignature) {
+        if (timeSignature === '4/4') {
+            return patterns4_4; // No adaptation needed
+        }
+
+        const adapted = {};
+
+        for (const [motionTypeName, motionData] of Object.entries(patterns4_4)) {
+            adapted[motionTypeName] = {
+                base: this.adaptRhythmObject(motionData.base, timeSignature),
+                layers: motionData.layers.map(layer => ({
+                    threshold: layer.threshold,
+                    ...this.adaptRhythmObject(layer, timeSignature)
+                }))
+            };
+        }
+
+        return adapted;
+    }
+
+    /**
+     * Adapt a rhythm object (containing pattern and velocity arrays) to a time signature
+     * @param {object} rhythmObj - Object with pattern and velocity arrays
+     * @param {string} timeSignature - Target time signature
+     * @returns {object} Adapted rhythm object
+     */
+    adaptRhythmObject(rhythmObj, timeSignature) {
+        const adapted = {};
+
+        for (const [key, array] of Object.entries(rhythmObj)) {
+            if (key === 'threshold') continue; // Skip metadata
+            if (!Array.isArray(array)) continue; // Skip non-array properties
+
+            adapted[key] = this.adaptSingleArray(array, timeSignature);
+        }
+
+        return adapted;
+    }
+
+    /**
+     * Adapt a single array (pattern or velocity) to a time signature
+     * @param {number[]} array - 16-element array for 4/4 time
+     * @param {string} timeSignature - Target time signature
+     * @returns {number[]} Adapted array
+     */
+    adaptSingleArray(array, timeSignature) {
+        switch (timeSignature) {
+            case '2/4':
+                // Take first 2 beats (8 sixteenths)
+                return array.slice(0, 8);
+
+            case '3/4':
+                // Take first 3 beats (12 sixteenths)
+                return array.slice(0, 12);
+
+            case '5/4':
+                // Extend with an extra beat (20 sixteenths total)
+                // Copy first beat to create 5th beat
+                return [...array, ...array.slice(0, 4)];
+
+            case '6/8':
+                // 6/8 time: 12 sixteenths (same as 3/4 duration)
+                return array.slice(0, 12);
+
+            default:
+                return array; // Fallback to 4/4
+        }
+    }
+
+    /**
      * Generate rhythm pattern from motion type and density
      * Applies density layers probabilistically (like drummer)
      * @param {string} motionType - Motion type key
@@ -376,10 +467,13 @@ export class SonofireBassist extends BaseInstrumentalist {
      * Called when density or motion type changes
      */
     regenerateRhythmPattern() {
+        // Regenerate rhythm layers for current time signature
+        this.rhythmLayers = this.defineRhythmLayers(this.timeSignature);
+
         // Use manual rhythm pattern if selected, otherwise use motion type's pattern
         const patternKey = this.rhythmPattern || this.motionType;
         this.currentRhythmPattern = this.generateRhythmPattern(patternKey, this.density);
-        console.log(`Bassist: Generated ${patternKey} pattern at density ${this.density.toFixed(2)}`);
+        console.log(`Bassist: Generated ${patternKey} pattern for ${this.timeSignature} at density ${this.density.toFixed(2)}`);
     }
 
     /**
@@ -851,6 +945,15 @@ export class SonofireBassist extends BaseInstrumentalist {
             this.regenerateRhythmPattern();
             this.renderThrottled(); // Use throttled render to prevent jitter
         });
+
+        // Subscribe to time signature changes
+        this.subscribe('context:timeSignature', (data) => {
+            this.timeSignature = data.timeSignature;
+            this.sixteenthsPerBar = data.sixteenthsPerBar;
+            console.log(`Bassist: Time signature changed to ${this.timeSignature} (${this.sixteenthsPerBar} sixteenths per bar)`);
+            this.regenerateRhythmPattern(); // Regenerate pattern for new time signature
+            this.renderThrottled();
+        });
     }
 
     /**
@@ -916,11 +1019,6 @@ export class SonofireBassist extends BaseInstrumentalist {
             setter: (value) => {
                 this.humanizationIntensity = value;
             }
-        });
-
-        // Render target lights after component is fully rendered
-        requestAnimationFrame(() => {
-            this.renderTargetLights();
         });
     }
 
@@ -1033,11 +1131,21 @@ export class SonofireBassist extends BaseInstrumentalist {
 
         const { tick, ppqn } = clockData;
 
-        // Calculate 16th note position in bar
-        const ticksPerBar = ppqn * 4; // 4/4 time
+        // Calculate 16th note position in bar (varies by time signature)
+        const [beatsPerBar, noteValue] = this.timeSignature.split('/').map(n => parseInt(n));
+        let quartersPerBar;
+        if (noteValue === 8 && beatsPerBar === 6) {
+            // 6/8 time: 6 eighth notes = 3 quarter notes duration
+            quartersPerBar = 3;
+        } else {
+            // Standard time signatures: beatsPerBar quarter notes
+            quartersPerBar = beatsPerBar;
+        }
+
+        const ticksPerBar = ppqn * quartersPerBar;
         const tickInBar = tick % ticksPerBar;
         const sixteenthNote = ppqn / 4;
-        const position = Math.floor(tickInBar / sixteenthNote); // 0-15
+        const position = Math.floor(tickInBar / sixteenthNote); // 0 to (sixteenthsPerBar-1)
 
         // Prevent duplicate processing
         if (position === this.lastPosition) return;
@@ -1286,13 +1394,15 @@ export class SonofireBassist extends BaseInstrumentalist {
                     <select id="rhythm-pattern-select" style="margin: 0 5px;">
                         ${this.renderRhythmPatternOptions()}
                     </select>
-                    | Density:
+                    | Density ${this.getTargetLightHTML('density')}:
                     <input type="range" id="density-slider" min="0" max="100" value="${this.density * 100}" style="width: 100px; vertical-align: middle;">
                     <span style="margin-left: 5px;">${Math.round(this.density * 100)}%</span>
                 </span>
                 <br>
                 <span style="margin-left: 10px; color: #888;">
-                    Humanization:
+                    Note Gen ${this.getTargetLightHTML('noteGeneration', 'inline')}
+                    | Velocity ${this.getTargetLightHTML('velocity', 'inline')}
+                    | Humanization ${this.getTargetLightHTML('humanization')}:
                     <input type="range" id="humanization-slider" min="0" max="100"
                            value="${Math.round(this.humanizationIntensity * 100)}"
                            style="width: 100px; vertical-align: middle;">
@@ -1373,10 +1483,8 @@ export class SonofireBassist extends BaseInstrumentalist {
             };
         }
 
-        // Re-render target lights after DOM update
-        requestAnimationFrame(() => {
-            this.renderTargetLights();
-        });
+        // Sync target light colors with existing bindings
+        this.syncTargetLightColors();
     }
 
     /**
