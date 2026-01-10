@@ -74,6 +74,19 @@ export class SonofireComposer extends SonofireBase {
         this.subscribe('clock:tick', (data) => {
             this.handleClockTick(data);
         });
+
+        // Subscribe to context:progression for section-based progression changes
+        this.subscribe('context:progression', (data) => {
+            if (data.progression) {
+                this.progression = data.progression;
+                this.progressionStyle = data.style || this.progressionStyle;
+                this.barsPerChord = data.barsPerChord || this.barsPerChord;
+                this.voicingType = data.voicingType || this.voicingType;
+                this.progressionIndex = 0;
+                this.publishCurrentChord();
+                this.render();
+            }
+        }, this);
     }
 
     /**
@@ -88,8 +101,17 @@ export class SonofireComposer extends SonofireBase {
             max: 16,
             elementSelector: '#bars-per-chord-input',
             setter: (value) => {
-                this.barsPerChord = Math.round(value);
-                this.render();
+                const newValue = Math.round(value);
+                // Only update if value actually changed
+                if (newValue !== this.barsPerChord) {
+                    this.barsPerChord = newValue;
+
+                    // Update input value directly (no full re-render)
+                    const input = this.$('#bars-per-chord-input');
+                    if (input) {
+                        input.value = newValue;
+                    }
+                }
             }
         });
 
@@ -101,9 +123,47 @@ export class SonofireComposer extends SonofireBase {
             max: 16,
             elementSelector: '#progression-length-input',
             setter: (value) => {
-                this.progressionLength = Math.round(value);
-                this.generateProgressionProbabilistic();
-                this.render();
+                const newLength = Math.round(value);
+                // Only update if length actually changed
+                if (newLength !== this.progressionLength) {
+                    this.setProgressionLength(newLength);
+                }
+            }
+        });
+
+        // Register progressionStyle parameter
+        this.registerWhippableParameter('progressionStyle', {
+            label: 'Progression Style',
+            parameterType: 'select',
+            options: ['jazz', 'jazz-251', 'blues', 'pop', 'pop-alternative', 'folk', 'modal', 'coltrane'],
+            elementSelector: '#style-select',
+            setter: (value) => {
+                const options = ['jazz', 'jazz-251', 'blues', 'pop', 'pop-alternative', 'folk', 'modal', 'coltrane'];
+                const index = Math.floor(value * options.length);
+                const style = options[Math.min(index, options.length - 1)];
+
+                // Only update if style actually changed
+                if (style !== this.progressionStyle) {
+                    this.setProgressionStyle(style);
+                }
+            }
+        });
+
+        // Register voicingType parameter
+        this.registerWhippableParameter('voicingType', {
+            label: 'Voicing Type',
+            parameterType: 'select',
+            options: ['close', 'open', 'drop2', 'shell'],
+            elementSelector: '#voicing-select',
+            setter: (value) => {
+                const options = ['close', 'open', 'drop2', 'shell'];
+                const index = Math.floor(value * options.length);
+                const voicing = options[Math.min(index, options.length - 1)];
+
+                // Only update if voicing type actually changed
+                if (voicing !== this.voicingType) {
+                    this.setVoicingType(voicing);
+                }
             }
         });
 
@@ -159,17 +219,135 @@ export class SonofireComposer extends SonofireBase {
      * Handle pool/tonic change from Conductor (new system)
      */
     handlePoolChange(poolData) {
+        // Check if pool/tonic actually changed
+        const poolChanged = poolData.poolKey !== this.poolKey;
+        const tonicChanged = poolData.tonicNote !== this.tonicNote;
+
         this.poolKey = poolData.poolKey;
         this.tonicNote = poolData.tonicNote;
         this.tonicName = poolData.tonicName;
 
-        console.log(`Composer: Pool/Tonic changed to ${this.poolKey}/${this.tonicName}`);
+        // Only regenerate progression if pool or tonic actually changed
+        if (poolChanged || tonicChanged) {
+            console.log(`Composer: Pool/Tonic changed to ${this.poolKey}/${this.tonicName}`);
 
-        // Regenerate progression in new pool/tonic
-        this.generateNewProgression();
+            // If we have an existing progression, only regenerate chords AFTER the current chord
+            if (this.progression.length > 0 && this.progressionIndex >= 0) {
+                this.regenerateRemainingProgression();
+            } else {
+                // No existing progression, generate a new one
+                this.generateNewProgression();
+            }
 
-        // Update full UI to reflect new pool/tonic (including friendly key name)
-        this.render();
+            // Update full UI to reflect new pool/tonic (including friendly key name)
+            this.render();
+        }
+    }
+
+    /**
+     * Regenerate chords after the current chord in the new pool/tonic
+     * Keeps chords up to and including the current chord unchanged
+     */
+    regenerateRemainingProgression() {
+        // Keep chords from 0 to progressionIndex (inclusive)
+        const keptChords = this.progression.slice(0, this.progressionIndex + 1);
+
+        // Calculate how many chords we need to regenerate
+        const remainingLength = this.progressionLength - keptChords.length;
+
+        if (remainingLength <= 0) {
+            // No chords to regenerate (we're at or past the end)
+            return;
+        }
+
+        // Get the last chord we're keeping as the starting point
+        const lastKeptChord = keptChords[keptChords.length - 1];
+
+        // Generate remaining chords starting from the next degree/tonic
+        const newChords = this.generatePartialProgression(
+            this.poolKey,
+            lastKeptChord.degree,
+            lastKeptChord.root,
+            this.progressionStyle,
+            remainingLength
+        );
+
+        // Combine kept chords with newly generated ones
+        this.progression = [...keptChords, ...newChords];
+
+        console.log(`Composer: Regenerated ${newChords.length} chords after index ${this.progressionIndex}:`,
+            this.progression.map(c => c.symbol).join(' → '));
+
+        // Publish current chord (in case voicing changed)
+        this.publishCurrentChord();
+
+        // Update UI
+        this.updateProgressionDisplay();
+    }
+
+    /**
+     * Generate a partial progression continuing from a given degree/tonic
+     * @param {string} poolKey - Pool key (e.g., "3♯")
+     * @param {number} startDegree - Starting degree in the mode
+     * @param {number} startTonicNote - Starting tonic MIDI note
+     * @param {string} style - Progression style
+     * @param {number} length - Number of chords to generate
+     * @returns {Array} Array of chord objects
+     */
+    generatePartialProgression(poolKey, startDegree, startTonicNote, style, length) {
+        const progression = [];
+
+        // Determine mode context (same as in generateProgressionProbabilistic)
+        const pool = harmonicContext.getNotePool(poolKey);
+        const poolPitchClasses = [...new Set(pool.map(n => n % 12))];
+
+        const poolToMajorTonic = {
+            '0': 0, '1♯': 7, '2♯': 2, '3♯': 9, '4♯': 4, '5♯': 11, '6♯': 6,
+            '1♭': 5, '2♭': 10, '3♭': 3, '4♭': 8, '5♭': 1
+        };
+        const majorTonicPC = poolToMajorTonic[poolKey] || 0;
+
+        const orderedPitchClasses = [];
+        for (let i = 0; i < 7; i++) {
+            const pc = (majorTonicPC + [0, 2, 4, 5, 7, 9, 11][i]) % 12;
+            if (poolPitchClasses.includes(pc)) {
+                orderedPitchClasses.push(pc);
+            }
+        }
+
+        const startTonicPC = startTonicNote % 12;
+        const modeIndex = orderedPitchClasses.indexOf(startTonicPC);
+        const modeNames = ['ionian', 'dorian', 'phrygian', 'lydian', 'mixolydian', 'aeolian', 'locrian'];
+        const modeName = modeNames[modeIndex] || 'ionian';
+        const useFlats = this.shouldUseFlats(poolKey);
+
+        // Start from the provided degree/tonic (continuing from last chord)
+        let currentDegree = startDegree;
+        let currentTonicNote = startTonicNote;
+
+        for (let i = 0; i < length; i++) {
+            // ALWAYS advance to next degree/tonic first (we're generating the NEXT chord after the last kept chord)
+            const next = selectNextTonicByFunction(currentDegree, startTonicNote, poolKey, style);
+            currentDegree = next.degree;
+            currentTonicNote = next.tonicNote;
+
+            // Get chord quality for this degree
+            const quality = getChordQualityForDegreeInPool(currentDegree, modeName);
+
+            // Create chord object
+            const chord = {
+                symbol: `${harmonicContext.midiToNoteName(currentTonicNote, useFlats)}${quality}`,
+                root: currentTonicNote,
+                quality: quality,
+                degree: currentDegree,
+                poolKey: poolKey,
+                mode: modeName
+            };
+
+            progression.push(chord);
+        }
+
+        return progression;
     }
 
     /**
@@ -423,11 +601,75 @@ export class SonofireComposer extends SonofireBase {
     }
 
     /**
+     * Change progression length
+     * Handles both extending (regenerate more chords) and truncating (remove chords)
+     */
+    setProgressionLength(newLength) {
+        const oldLength = this.progressionLength;
+        this.progressionLength = newLength;
+
+        if (this.progression.length === 0) {
+            // No existing progression, generate a new one
+            this.generateNewProgression();
+        } else {
+            // Keep chords from 0 to progressionIndex (inclusive)
+            const keptChords = this.progression.slice(0, this.progressionIndex + 1);
+
+            if (newLength <= keptChords.length) {
+                // New length is shorter than or equal to kept chords
+                // Just truncate to new length
+                this.progression = this.progression.slice(0, newLength);
+            } else {
+                // New length is longer - need to regenerate remaining chords
+                const remainingLength = newLength - keptChords.length;
+                const lastKeptChord = keptChords[keptChords.length - 1];
+
+                // Generate remaining chords
+                const newChords = this.generatePartialProgression(
+                    this.poolKey,
+                    lastKeptChord.degree,
+                    lastKeptChord.root,
+                    this.progressionStyle,
+                    remainingLength
+                );
+
+                // Combine kept chords with newly generated ones
+                this.progression = [...keptChords, ...newChords];
+            }
+
+            console.log(`Composer: Progression length changed ${oldLength} → ${newLength}:`,
+                this.progression.map(c => c.symbol).join(' → '));
+
+            this.publishCurrentChord();
+            this.updateProgressionDisplay();
+        }
+
+        // Update UI to show new length
+        const lengthInput = this.$('#progression-length-input');
+        if (lengthInput) {
+            lengthInput.value = newLength;
+        }
+    }
+
+    /**
      * Change progression style
      */
     setProgressionStyle(style) {
         this.progressionStyle = style;
-        this.generateNewProgression();
+
+        // Only regenerate chords after the current chord (same pattern as pool changes)
+        if (this.progression.length > 0 && this.progressionIndex >= 0) {
+            this.regenerateRemainingProgression();
+        } else {
+            // No existing progression, generate a new one
+            this.generateNewProgression();
+        }
+
+        // Update UI to show new style
+        const styleSelect = this.$('#style-select');
+        if (styleSelect) {
+            styleSelect.value = style;
+        }
     }
 
     /**
@@ -436,6 +678,12 @@ export class SonofireComposer extends SonofireBase {
     setVoicingType(voicingType) {
         this.voicingType = voicingType;
         this.publishCurrentChord(); // Re-voice current chord
+
+        // Update UI to show new voicing type
+        const voicingSelect = this.$('#voicing-select');
+        if (voicingSelect) {
+            voicingSelect.value = voicingType;
+        }
     }
 
     /**
@@ -633,19 +881,19 @@ export class SonofireComposer extends SonofireBase {
 
                 <!-- Progression Settings -->
                 <div style="margin-bottom: 10px;">
-                    <strong>Style:</strong>
+                    <strong>Style ${this.getTargetLightHTML('progressionStyle')}:</strong>
                     <select id="style-select">
                         ${this.renderStyleOptions()}
                     </select>
-                    <strong style="margin-left: 15px;">Length:</strong>
+                    <strong style="margin-left: 15px;">Length ${this.getTargetLightHTML('progressionLength')}:</strong>
                     <input type="number" id="progression-length-input" value="${this.progressionLength}" min="2" max="16" style="width: 50px;">
                     <button id="regenerate-btn" style="margin-left: 10px;">Regenerate</button>
                 </div>
 
                 <div style="margin-bottom: 10px;">
-                    <strong>Bars per Chord:</strong>
+                    <strong>Bars per Chord ${this.getTargetLightHTML('barsPerChord')}:</strong>
                     <input type="number" id="bars-per-chord-input" value="${this.barsPerChord}" min="1" max="16" style="width: 60px;">
-                    <strong style="margin-left: 15px;">Voicing:</strong>
+                    <strong style="margin-left: 15px;">Voicing ${this.getTargetLightHTML('voicingType')}:</strong>
                     <select id="voicing-select">
                         ${this.renderVoicingOptions()}
                     </select>
@@ -681,7 +929,7 @@ export class SonofireComposer extends SonofireBase {
     setupEventHandlers() {
         this.$('#style-select').onchange = (e) => {
             this.setProgressionStyle(e.target.value);
-            this.render(); // Re-render to show new progression
+            // No render() - setProgressionStyle() already updates dropdown and progression display
         };
 
         this.$('#regenerate-btn').onclick = () => {
@@ -690,8 +938,8 @@ export class SonofireComposer extends SonofireBase {
         };
 
         this.$('#progression-length-input').onchange = (e) => {
-            this.progressionLength = parseInt(e.target.value);
-            console.log(`Composer: Progression length set to ${this.progressionLength}`);
+            const newLength = parseInt(e.target.value);
+            this.setProgressionLength(newLength);
         };
 
         this.$('#bars-per-chord-input').onchange = (e) => {

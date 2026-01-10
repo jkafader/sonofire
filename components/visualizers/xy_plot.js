@@ -1,7 +1,6 @@
 import 'https://unpkg.com/d3@7.9.0';
 import { SonofireVisualizerBase } from '../base/sonofire_visualizer_base.js';
 import { MIDI_NOTES_FLAT, MIDI_NOTES_SHARP } from '../../lib/midi_data.js';
-import { WhipDragHandler } from '../../lib/whip_drag_handler.js';
 import { PLAYHEAD_SIDEBAR_WIDTH } from '../../lib/mixins/playheads.js';
 
 /**
@@ -528,7 +527,7 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
 
         // Remove old playhead visuals
         parent.selectAll('.multi-playhead').remove();
-        parent.selectAll('.playhead-source-light').remove();
+        parent.selectAll('.playhead-indicator-triangle').remove();
 
         // Render each playhead
         this.playheads.forEach((playhead, index) => {
@@ -542,7 +541,7 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
             const xPosition = this.xScale(targetDate);
 
             // Render playhead line
-            parent.append('line')
+            const line = parent.append('line')
                 .attr('class', 'multi-playhead')
                 .attr('data-playhead-id', playhead.id)
                 .style('stroke', playhead.color)
@@ -553,33 +552,74 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
                 .attr('x2', xPosition)
                 .attr('y2', this.height);
 
-            // Render source light (draggable circle at top of playhead)
-            const sourceLight = parent.append('circle')
-                .attr('class', 'playhead-source-light')
+            // Render draggable triangle at top of playhead (pointing down)
+            const triangleSize = 8;
+            const triangleTop = 0;  // Start at the very top
+            const trianglePoints = [
+                [xPosition - triangleSize, triangleTop], // Top left
+                [xPosition + triangleSize, triangleTop], // Top right
+                [xPosition, triangleTop + triangleSize * 1.5]  // Bottom point (pointing down)
+            ];
+
+            const triangle = parent.append('polygon')
+                .attr('class', 'playhead-indicator-triangle')
                 .attr('data-playhead-id', playhead.id)
-                .attr('data-visualizer-id', this.getVisualizerId())
-                .attr('cx', xPosition)
-                .attr('cy', 10)  // Near the top of the plot area
-                .attr('r', 8)
+                .attr('points', trianglePoints.map(p => p.join(',')).join(' '))
                 .style('fill', playhead.color)
-                .style('stroke', '#ffffff')
-                .style('stroke-width', 2)
                 .style('cursor', 'grab')
                 .style('opacity', 0.9);
 
-            // Add tooltip to source light
-            sourceLight.append('title')
-                .text(`Playhead ${index + 1}\nSpeed: ${playhead.getSpeedLabel()}\nDrag to create whip binding`);
+            triangle.append('title')
+                .text(`Playhead ${index + 1}\nSpeed: ${playhead.getSpeedLabel()}\nDrag to reposition playhead`);
 
-            // Attach drag handler
-            sourceLight.on('mousedown', (event) => {
-                WhipDragHandler.startDrag(event, {
-                    visualizerId: this.getVisualizerId(),
-                    playheadId: playhead.id,
-                    playhead: playhead,
-                    color: playhead.color,
+            // Add drag behavior using D3's drag API (more robust)
+            const self = this;
+            const margin = self.margin || { left: 60, right: 20, top: 20, bottom: 50 };
+
+            const dragBehavior = d3.drag()
+                .on('start', function(event) {
+                    triangle.style('cursor', 'grabbing');
+                    event.sourceEvent.stopPropagation();
+                })
+                .on('drag', function(event) {
+                    // Get mouse position relative to the plot
+                    const svgNode = svg.node();
+                    const svgRect = svgNode.getBoundingClientRect();
+
+                    // Calculate x position relative to the SVG's left edge
+                    const mouseX = event.sourceEvent.clientX - svgRect.left;
+
+                    // Clamp to plot bounds (accounting for margins)
+                    const plotLeft = margin.left;
+                    const plotRight = self.width + margin.left;
+                    const newX = Math.max(plotLeft, Math.min(plotRight, mouseX)) - margin.left;
+
+                    // Update line position directly (smooth, no re-render)
+                    line.attr('x1', newX)
+                        .attr('x2', newX);
+
+                    // Update triangle position directly
+                    const newTrianglePoints = [
+                        [newX - triangleSize, triangleTop],
+                        [newX + triangleSize, triangleTop],
+                        [newX, triangleTop + triangleSize * 1.5]
+                    ];
+                    triangle.attr('points', newTrianglePoints.map(p => p.join(',')).join(' '));
+
+                    // Calculate and store new position as percentage (0-1)
+                    const [minDate, maxDate] = self.xDomain;
+                    const newDate = self.xScale.invert(newX);
+                    const dateDomain = maxDate - minDate;
+                    const newPosition = Math.max(0, Math.min(1, (newDate - minDate) / dateDomain));
+                    playhead.setPosition(newPosition);
+                })
+                .on('end', function(event) {
+                    triangle.style('cursor', 'grab');
+                    // Save playhead state after drag
+                    self.savePlayheads();
                 });
-            });
+
+            triangle.call(dragBehavior);
         });
     }
 

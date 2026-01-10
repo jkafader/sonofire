@@ -106,6 +106,87 @@ export class SonofireConductor extends SonofireBase {
                 this.setDensity(value);
             }
         });
+
+        // Register mood parameter (sorted from quietest to loudest)
+        this.registerWhippableParameter('mood', {
+            label: 'Mood',
+            parameterType: 'select',
+            options: ['sparse', 'relaxed', 'dense', 'tense'],
+            elementSelector: '#mood-select',
+            setter: (value) => {
+                const moods = ['sparse', 'relaxed', 'dense', 'tense']; // quietest → loudest
+                const index = Math.floor(value * moods.length);
+                const mood = moods[Math.min(index, moods.length - 1)];
+
+                // Only update if mood actually changed
+                if (mood !== this.mood) {
+                    this.setMood(mood);
+                    // No render() - setMood() already updates the dropdown
+                }
+            }
+        });
+
+        // Register timeSignature parameter
+        this.registerWhippableParameter('timeSignature', {
+            label: 'Time Signature',
+            parameterType: 'select',
+            options: ['2/4', '3/4', '4/4', '5/4', '6/8'],
+            elementSelector: '#time-signature-select',
+            icon: '🎵',
+            setter: (value) => {
+                const options = ['2/4', '3/4', '4/4', '5/4', '6/8'];
+                const index = Math.floor(value * options.length);
+                const timeSignature = options[Math.min(index, options.length - 1)];
+
+                // Only update if time signature actually changed
+                if (timeSignature !== this.timeSignature) {
+                    this.setTimeSignature(timeSignature);
+                    // No render() - setTimeSignature() already updates the dropdown
+                }
+            }
+        });
+
+        // Register notePool parameter
+        this.registerWhippableParameter('notePool', {
+            label: 'Note Pool',
+            parameterType: 'select',
+            elementSelector: '#pool-select',
+            icon: '🎹',
+            setter: (value) => {
+                // Get pool keys from harmonicContext
+                const poolKeys = ['6♯', '5♯', '4♯', '3♯', '2♯', '1♯', '0', '1♭', '2♭', '3♭', '4♭', '5♭', ];
+                const index = Math.floor(value * poolKeys.length);
+                const poolKey = poolKeys[Math.min(index, poolKeys.length - 1)];
+
+                // Only update if the pool actually changed
+                if (poolKey !== this.poolKey && this.tonicName) {
+                    // Get the new pool notes
+                    const pool = harmonicContext.getNotePool(poolKey);
+                    const poolPitchClasses = [...new Set(pool.map(n => n % 12))];
+
+                    // Get the base letter name (without sharps/flats)
+                    const baseLetter = this.tonicName.charAt(0);
+
+                    // Find a note in the pool that starts with the same letter
+                    const noteNames = ['C', 'C♯', 'D♭', 'D', 'D♯', 'E♭', 'E', 'F', 'F♯', 'G♭', 'G', 'G♯', 'A♭', 'A', 'A♯', 'B♭', 'B'];
+                    const pitchClassMap = {
+                        'C': 0, 'C♯': 1, 'D♭': 1, 'D': 2, 'D♯': 3, 'E♭': 3, 'E': 4,
+                        'F': 5, 'F♯': 6, 'G♭': 6, 'G': 7, 'G♯': 8, 'A♭': 8, 'A': 9, 'A♯': 10, 'B♭': 10, 'B': 11
+                    };
+
+                    // Find notes in pool that start with the same letter
+                    const matchingNotes = noteNames.filter(name => {
+                        return name.charAt(0) === baseLetter && poolPitchClasses.includes(pitchClassMap[name]);
+                    });
+
+                    // Use matching note if found, otherwise keep current tonic (even if not in pool)
+                    const newTonic = matchingNotes.length > 0 ? matchingNotes[0] : this.tonicName;
+
+                    this.setPoolAndTonic(poolKey, newTonic);
+                    // No render() - setPoolAndTonic() already updates dropdowns
+                }
+            }
+        });
     }
 
     /**
@@ -268,6 +349,43 @@ export class SonofireConductor extends SonofireBase {
         harmonicContext.setPoolAndTonic(poolKey, tonicNote, tonicName);
 
         console.log(`Conductor: Pool/Tonic set to ${poolKey}/${tonicName} (MIDI ${tonicNote})`);
+
+        // Update dropdowns directly (no full re-render)
+        this.updatePoolTonicDropdowns();
+    }
+
+    /**
+     * Update pool and tonic dropdowns without full re-render
+     */
+    updatePoolTonicDropdowns() {
+        // Update pool dropdown
+        const poolSelect = this.$('#pool-select');
+        if (poolSelect) {
+            poolSelect.value = this.poolKey || '0';
+        }
+
+        // Update tonic dropdown options (pool change affects available tonics)
+        const tonicSelect = this.$('#tonic-select');
+        if (tonicSelect) {
+            const poolKey = this.poolKey || '0';
+            const pool = harmonicContext.getNotePool(poolKey);
+            const poolPitchClasses = [...new Set(pool.map(n => n % 12))].sort((a, b) => a - b);
+
+            // Determine note naming convention
+            const useFlats = poolKey.includes('♭');
+            const sharpNames = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+            const flatNames = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
+            const noteNames = useFlats ? flatNames : sharpNames;
+
+            // Rebuild tonic options
+            const options = poolPitchClasses.map(pc => {
+                const noteName = noteNames[pc];
+                const selected = noteName === this.tonicName ? 'selected' : '';
+                return `<option value="${noteName}" ${selected}>${noteName}</option>`;
+            }).join('');
+
+            tonicSelect.innerHTML = options;
+        }
     }
 
     /**
@@ -279,6 +397,12 @@ export class SonofireConductor extends SonofireBase {
         this.publish('context:mood', { mood });
 
         console.log(`Conductor: Mood set to ${mood}`);
+
+        // Update UI to show new mood
+        const moodSelect = this.$('#mood-select');
+        if (moodSelect) {
+            moodSelect.value = mood;
+        }
     }
 
     /**
@@ -320,6 +444,12 @@ export class SonofireConductor extends SonofireBase {
         });
 
         console.log(`Conductor: Time signature set to ${timeSignature} (${sixteenthsPerBar} sixteenths per bar)`);
+
+        // Update UI to show new time signature
+        const timeSignatureSelect = this.$('#time-signature-select');
+        if (timeSignatureSelect) {
+            timeSignatureSelect.value = timeSignature;
+        }
     }
 
     /**
@@ -345,6 +475,12 @@ export class SonofireConductor extends SonofireBase {
         this.tempo = bpm;
         midiClock.setBPM(bpm);
         console.log(`Conductor: Tempo set to ${bpm} BPM`);
+
+        // Update UI to show new tempo (just update the input value)
+        const tempoInput = this.$('#tempo-input');
+        if (tempoInput) {
+            tempoInput.value = bpm;
+        }
     }
 
     /**
@@ -399,6 +535,7 @@ export class SonofireConductor extends SonofireBase {
                 <!-- Pool/Tonic Notation (Primary System) -->
                 <div style="margin-bottom: 10px; padding: 10px; background: #1e1e1e; border-radius: 4px;">
                     <strong style="color: #569cd6;">Key:</strong>
+                    <strong>Note Pool ${this.getTargetLightHTML('notePool')}:</strong>
                     <select id="pool-select" style="margin-left: 10px;">
                         ${this.renderPoolOptions()}
                     </select>
@@ -434,7 +571,7 @@ export class SonofireConductor extends SonofireBase {
                     <span>BPM</span>
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <strong>Time Signature:</strong>
+                    <strong>Time Signature ${this.getTargetLightHTML('timeSignature')}:</strong>
                     <select id="time-signature-select">
                         ${this.renderTimeSignatureOptions()}
                     </select>
@@ -449,7 +586,7 @@ export class SonofireConductor extends SonofireBase {
                     </span>
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <strong>Mood:</strong>
+                    <strong>Mood ${this.getTargetLightHTML('mood')}:</strong>
                     <select id="mood-select">
                         ${this.renderMoodOptions()}
                     </select>
@@ -505,14 +642,14 @@ export class SonofireConductor extends SonofireBase {
             }
 
             this.setPoolAndTonic(poolKey, tonicName);
-            this.render(); // Update UI to show new pool/tonic
+            // No render() - setPoolAndTonic() already updates dropdowns
         };
 
         this.$('#tonic-select').onchange = (e) => {
             const tonicName = e.target.value;
             const poolKey = this.poolKey || '0';
             this.setPoolAndTonic(poolKey, tonicName);
-            this.render(); // Update UI to show new pool/tonic
+            // No render() - setPoolAndTonic() already updates dropdowns
         };
 
         // Legacy key/scale selectors - convert to pool/tonic
@@ -525,7 +662,7 @@ export class SonofireConductor extends SonofireBase {
                 );
                 console.log(`Conductor: Legacy key selector changed to ${e.target.value} ${this.initialScale} → ${poolKey}/${tonicName}`);
                 this.setPoolAndTonic(poolKey, tonicName);
-                this.render();
+                // No render() - setPoolAndTonic() already updates dropdowns
             };
         }
 
@@ -538,7 +675,7 @@ export class SonofireConductor extends SonofireBase {
                 );
                 console.log(`Conductor: Legacy scale selector changed to ${this.initialKey} ${e.target.value} → ${poolKey}/${tonicName}`);
                 this.setPoolAndTonic(poolKey, tonicName);
-                this.render();
+                // No render() - setPoolAndTonic() already updates dropdowns
             };
         }
 
@@ -605,7 +742,7 @@ export class SonofireConductor extends SonofireBase {
     }
 
     renderMoodOptions() {
-        const moods = ['relaxed', 'tense', 'sparse', 'dense'];
+        const moods = ['sparse', 'relaxed', 'dense', 'tense']; // quietest → loudest
         return moods.map(m =>
             `<option value="${m}" ${m === this.mood ? 'selected' : ''}>${m}</option>`
         ).join('');

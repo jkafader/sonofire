@@ -698,6 +698,28 @@ export class SonofireDrummer extends BaseInstrumentalist {
                 this.swingAmount = value;
             }
         });
+
+        // Register Density parameter
+        this.registerWhippableParameter('density', {
+            label: 'Density',
+            parameterType: 'number',
+            min: 0,
+            max: 1,
+            elementSelector: '#density-slider',
+            setter: (value) => {
+                this.density = value;
+                this.selectGroove();
+                // Update slider display
+                const input = this.$('#density-slider');
+                if (input) {
+                    input.value = Math.round(value * 100);
+                }
+                const display = this.$('#density-value');
+                if (display) {
+                    display.textContent = value.toFixed(2);
+                }
+            }
+        });
     }
 
     /**
@@ -1061,11 +1083,15 @@ export class SonofireDrummer extends BaseInstrumentalist {
                         ${this.renderStyleOptions()}
                     </select>
                     | Mood: ${this.mood}
-                    | Density: ${(this.density * 100).toFixed(0)}%
                 </span>
                 <br>
                 <span style="margin-left: 10px; color: #888;">
-                    Humanization ${this.getTargetLightHTML('humanization')}:
+                    Density ${this.getTargetLightHTML('density')}:
+                    <input type="range" id="density-slider" min="0" max="100"
+                           value="${Math.round(this.density * 100)}"
+                           style="width: 100px; vertical-align: middle;">
+                    <span id="density-value">${this.density.toFixed(2)}</span>
+                    | Humanization ${this.getTargetLightHTML('humanization')}:
                     <input type="range" id="humanization-slider" min="0" max="100"
                            value="${Math.round(this.humanizationIntensity * 100)}"
                            style="width: 100px; vertical-align: middle;">
@@ -1076,7 +1102,7 @@ export class SonofireDrummer extends BaseInstrumentalist {
                            value="${Math.round(this.swingAmount * 100)}"
                            style="width: 100px; vertical-align: middle;">
                     <span id="swing-value">${Math.round(this.swingAmount * 100)}%</span>
-                    | <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
+                    | Mute ${this.getTargetLightHTML('mute')}: <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
                     | <button id="debug-btn" style="padding: 2px 8px; margin: 0 5px;">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
                     | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
                 </span>
@@ -1115,6 +1141,20 @@ export class SonofireDrummer extends BaseInstrumentalist {
         if (debugBtn) {
             debugBtn.onclick = () => {
                 this.toggleDebug();
+            };
+        }
+
+        const densitySlider = this.$('#density-slider');
+        if (densitySlider) {
+            densitySlider.onmousedown = () => this.startUIInteraction();
+            densitySlider.onmouseup = () => this.endUIInteraction();
+            densitySlider.oninput = (e) => {
+                this.density = parseInt(e.target.value) / 100;
+                this.selectGroove();
+                const valueDisplay = this.$('#density-value');
+                if (valueDisplay) {
+                    valueDisplay.textContent = this.density.toFixed(2);
+                }
             };
         }
 

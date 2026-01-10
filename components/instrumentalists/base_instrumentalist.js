@@ -85,6 +85,15 @@ export class BaseInstrumentalist extends SonofireBase {
             this.tonicNote = data.tonicNote;
             this.currentScale = data.notes || [];
         });
+
+        // Subscribe to context:mute for section-based muting
+        this.subscribe('context:mute', (data) => {
+            const myId = this.getComponentId();
+            if (data.mutes && data.mutes[myId] !== undefined) {
+                this.muted = data.mutes[myId];
+                this.renderThrottled();
+            }
+        }, this);
     }
 
     /**
@@ -92,6 +101,17 @@ export class BaseInstrumentalist extends SonofireBase {
      */
     connectedCallback() {
         super.connectedCallback();
+
+        // Register mute as whippable parameter
+        this.registerWhippableParameter('mute', {
+            label: 'Mute',
+            parameterType: 'toggle',  // Binary: 0 = unmuted, >0.5 = muted
+            icon: '🔇',
+            setter: (value) => {
+                this.muted = value > 0.5;
+                this.renderThrottled();
+            }
+        });
 
         // Discover operational modes from PubSub
         this.discoverOperationalModes();

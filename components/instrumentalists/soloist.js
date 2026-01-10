@@ -790,7 +790,7 @@ export class SonofireSoloist extends BaseInstrumentalist {
                     | Max Interval ${this.getTargetLightHTML('maxInterval')}:
                     <input type="range" id="max-interval-slider" min="0" max="12" value="${this.maxInterval}" style="width: 100px; vertical-align: middle;">
                     <span style="margin-left: 5px;">${this.maxInterval}</span>
-                    | <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
+                    | Mute ${this.getTargetLightHTML('mute')}: <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
                     | <button id="debug-btn" style="padding: 2px 8px; margin: 0 5px;">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
                     | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
                 </span>

@@ -769,7 +769,7 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
                            style="width: 100px; vertical-align: middle;">
                     <span id="humanization-value">${Math.round(this.humanizationIntensity * 100)}%</span>
                     | <button id="humanization-toggle" style="padding: 2px 8px; margin: 0 5px;">${this.humanizationEnabled ? '🎭 Human' : '🤖 Robot'}</button>
-                    | <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
+                    | Mute ${this.getTargetLightHTML('mute')}: <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
                     | <button id="debug-btn" style="padding: 2px 8px; margin: 0 5px;">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
                     | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
                 </span>

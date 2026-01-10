@@ -83,7 +83,7 @@ export class WhipTargetLight extends HTMLElement {
                  style="border-radius: 50%; ${positionStyle}"
                  title="${this.componentId}.${this.parameterId}">
                 <div class="light" style="
-                    border: 1px solid white;
+                    border: 2px solid white;
                     width: 10px;
                     height: 10px;
                     border-radius: 50%;

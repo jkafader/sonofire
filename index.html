@@ -80,32 +80,7 @@
 <body>
     <h1>Sonofire: Data Sonification System</h1>
 
-    <div id="panic-container">
-        <button class="panic" onclick="midiPanic()">🚨 MIDI PANIC - Stop All Notes</button>
-        <p style="margin: 10px 0 0 0; font-size: 14px; color: #888;">Click to immediately stop all playing notes on all channels</p>
-    </div>
-
     <div class="info">
-        <ul>
-            <li>The <strong>Conductor</strong> manages harmonic context and MIDI Clock.</li>
-            <li>The <strong>Composer</strong> generates chord progressions from the harmonic context.</li>
-            <li>The <strong>X-Y plot</strong> has <strong>playheads</strong> which generate data events.
-                <ul>
-                    <li>Playheads are bound to <strong>instrumentalists</strong> via <strong>drag-and-drop whips</strong></li>
-                </ul>
-            </li>
-            <li>The <strong>Soloist</strong> generates... melody-adjacent... song information that takes a number of parameters into account:</li>
-                <ul>
-                    <li>The current chord from the composer</li>
-                    <li>The next chord from the composer</li>
-                    <li>The count of data events in the current chord (from lookahead from X-Y playhead)</li>
-                    <li>A linear regression of a lookahead of all of the data events in the current chord</li>
-
-                </ul>
-            </li>
-            <li>The <strong>Bassist</strong> generates uninspired basslines. It can also be associated with a playhead to use data events as rhythm inputs</li>
-            <li>The <strong>Drummer</strong> generates uninspired drums. Currently, it only takes "accent" inputs from the playheads.</li>
-        </ul>
         <div>
             <!--button onclick="initAudio()">Initialize Audio Outputs</button-->
             <script>
@@ -123,9 +98,10 @@
                 MIDI Output
             </label>
             <label style="margin-left: 10px;">
-                <input type="checkbox" id="webaudio-toggle" checked onchange="toggleWebAudio(this.checked)">
+                <input type="checkbox" id="webaudio-toggle" onchange="toggleWebAudio(this.checked)">
                 WebAudio Output
             </label>
+        <button class="panic" style="margin-left: 30px;" onclick="midiPanic()">🚨 PANIC</button>
         </div>
         <div id="status">Audio: Not initialized</div>
     </div>
@@ -246,6 +222,7 @@
         // Make available globally for buttons
         window.audioRouter = audioRouter;
         window.PubSub = PubSub;
+        audioRouter.setWebAudioEnabled(false);
 
         // Status updates
         const statusEl = document.getElementById('status');
