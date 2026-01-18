@@ -531,6 +531,25 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
             this.regenerateRhythmPattern(); // Regenerate pattern for new time signature
             this.renderThrottled();
         });
+
+        // Subscribe to keyboardist settings from sections
+        this.subscribe('context:keyboardist', (data) => {
+            if (data.instrumentStyle && data.instrumentStyle !== this.instrumentStyle) {
+                this.instrumentStyle = data.instrumentStyle;
+                this.currentVoicing = this.generateVoicing();
+            }
+            if (data.playingApproach && data.playingApproach !== this.playingApproach) {
+                this.playingApproach = data.playingApproach;
+                this.regenerateRhythmPattern();
+            }
+            if (data.humanizationEnabled !== undefined && data.humanizationEnabled !== this.humanizationEnabled) {
+                this.humanizationEnabled = data.humanizationEnabled;
+            }
+            if (data.humanizationIntensity !== undefined && data.humanizationIntensity !== this.humanizationIntensity) {
+                this.humanizationIntensity = data.humanizationIntensity;
+            }
+            this.renderThrottled();
+        }, this);
     }
 
     /**
@@ -574,6 +593,50 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
             setter: (value) => {
                 this.density = value;
                 this.regenerateRhythmPattern();
+            }
+        });
+
+        // Note Generation Trigger
+        this.registerWhippableParameter('trigger', {
+            label: 'Note Gen',
+            parameterType: 'pulse',
+            icon: '🎵',
+            setter: (value) => {
+                // Don't play if not enabled or no voicing
+                if (!this.enabled || !this.currentVoicing || this.currentVoicing.length === 0) {
+                    return;
+                }
+
+                // Ensure we have a voicing
+                if (!this.currentVoicing || this.currentVoicing.length === 0) {
+                    this.currentVoicing = this.generateVoicing();
+                    if (this.currentVoicing.length === 0) return;
+                }
+
+                // Get base velocity and duration from instrument style
+                const style = this.instrumentStyles[this.instrumentStyle];
+                const velocity = style.velocityBase || 75;
+                const duration = style.duration || 300;
+
+                // Play based on current approach
+                const approach = this.playingApproaches[this.playingApproach];
+
+                switch (approach.playMode) {
+                    case 'sequential':
+                        // Arpeggio: play next note in sequence
+                        this.playArpeggio(0, velocity, duration, 0);
+                        break;
+
+                    case 'simultaneous':
+                        // Block: play all notes together
+                        this.playBlockChord(0, velocity, duration, 0);
+                        break;
+
+                    case 'rhythmic':
+                        // Comping: play chord with slight spread
+                        this.playComping(0, velocity, duration, 0);
+                        break;
+                }
             }
         });
     }
@@ -763,7 +826,8 @@ export class SonofireKeyboardist extends BaseInstrumentalist {
                 </span>
                 <br>
                 <span style="margin-left: 10px; color: #888;">
-                    Humanization ${this.getTargetLightHTML('humanization')}:
+                    Note Gen ${this.getTargetLightHTML('trigger')}
+                    | Humanization ${this.getTargetLightHTML('humanization')}:
                     <input type="range" id="humanization-slider" min="0" max="100"
                            value="${Math.round(this.humanizationIntensity * 100)}"
                            style="width: 100px; vertical-align: middle;">

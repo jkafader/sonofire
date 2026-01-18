@@ -30,6 +30,13 @@ export class SonofireComposer extends SonofireBase {
         this.progressionLength = 4;
         this.useProbabilistic = true;  // Default to new system
         this.nextTonicCenter = null;   // For UI preview
+
+        // Section system
+        this.sections = [];                          // Array of section definitions
+        this.currentSectionIndex = -1;               // Current section (-1 = no section)
+        this.sectionMode = 'manual';                 // 'manual' | 'auto'
+        this.arrangementOrder = [];                  // [0, 1, 0, 2, 1] - section sequence
+        this.arrangementIndex = 0;                   // Position in arrangement
     }
 
     /**
@@ -82,7 +89,8 @@ export class SonofireComposer extends SonofireBase {
                 this.progressionStyle = data.style || this.progressionStyle;
                 this.barsPerChord = data.barsPerChord || this.barsPerChord;
                 this.voicingType = data.voicingType || this.voicingType;
-                this.progressionIndex = 0;
+                this.progressionLength = data.progressionLength || this.progression.length;
+                this.progressionIndex = data.progressionIndex ?? 0;  // Restore chord position
                 this.publishCurrentChord();
                 this.render();
             }
@@ -96,20 +104,23 @@ export class SonofireComposer extends SonofireBase {
         // Register barsPerChord parameter
         this.registerWhippableParameter('barsPerChord', {
             label: 'Bars Per Chord',
-            parameterType: 'number',
-            min: 1,
-            max: 16,
-            elementSelector: '#bars-per-chord-input',
+            parameterType: 'select',
+            options: [8, 7, 6, 5, 4, 3, 2, 1, 0.5, 0.25],
+            elementSelector: '#bars-per-chord-select',
             setter: (value) => {
-                const newValue = Math.round(value);
+                // Map 0-1 to barsPerChord options
+                const options = [8, 7, 6, 5, 4, 3, 2, 1, 0.5, 0.25];
+                const index = Math.floor(value * options.length);
+                const newValue = options[Math.min(index, options.length - 1)];
+
                 // Only update if value actually changed
                 if (newValue !== this.barsPerChord) {
                     this.barsPerChord = newValue;
 
-                    // Update input value directly (no full re-render)
-                    const input = this.$('#bars-per-chord-input');
-                    if (input) {
-                        input.value = newValue;
+                    // Update select value directly (no full re-render)
+                    const select = this.$('#bars-per-chord-select');
+                    if (select) {
+                        select.value = newValue;
                     }
                 }
             }
@@ -167,6 +178,27 @@ export class SonofireComposer extends SonofireBase {
             }
         });
 
+        // Register sectionIndex parameter for data-driven section switching
+        this.registerWhippableParameter('sectionIndex', {
+            label: 'Section Index',
+            parameterType: 'number',
+            min: 0,
+            max: Math.max(0, this.sections.length - 1),
+            icon: '🎬',
+            setter: (value) => {
+                if (this.sections.length === 0) return;
+
+                // Map 0-1 value to section index
+                const index = Math.floor(value * this.sections.length);
+                const clampedIndex = Math.max(0, Math.min(index, this.sections.length - 1));
+
+                // Only load if index actually changed
+                if (clampedIndex !== this.currentSectionIndex) {
+                    this.loadSection(clampedIndex);
+                }
+            }
+        });
+
         // Render target lights after component is fully rendered
         requestAnimationFrame(() => {
             this.renderTargetLights();
@@ -179,6 +211,9 @@ export class SonofireComposer extends SonofireBase {
     connectedCallback() {
         super.connectedCallback();
 
+        // Restore sections from persistence
+        this.restoreSections();
+
         // Discover current context from PubSub
         const poolContext = this.getLastValue('context:pool');
         if (poolContext) {
@@ -190,8 +225,11 @@ export class SonofireComposer extends SonofireBase {
         // Register whippable parameters (after render)
         this.registerWhippableParameters();
 
-        // Generate initial progression
-        this.generateNewProgression();
+        // Only generate initial progression if we don't have sections
+        // (sections will load their own progression)
+        if (this.sections.length === 0 || this.currentSectionIndex < 0) {
+            this.generateNewProgression();
+        }
     }
 
     /**
@@ -364,6 +402,9 @@ export class SonofireComposer extends SonofireBase {
         if (tick % ticksPerChord === 0 && tick > 0) {
             this.advanceChord();
         }
+
+        // Note: Section auto-advancement now happens in advanceChord()
+        // when the chord progression completes (wraps to first chord)
     }
 
     /**
@@ -496,9 +537,22 @@ export class SonofireComposer extends SonofireBase {
      * Advance to next chord in progression
      */
     advanceChord() {
+        const previousIndex = this.progressionIndex;
         this.progressionIndex = (this.progressionIndex + 1) % this.progression.length;
 
         console.log(`Composer: Advanced to chord ${this.progressionIndex + 1}/${this.progression.length}`);
+
+        // Detect progression completion (wrapped from last chord to first)
+        if (previousIndex === this.progression.length - 1 && this.progressionIndex === 0) {
+            console.log(`Composer: Progression completed (wrapped to first chord)`);
+
+            // In auto mode, advance to next section when progression completes
+            if (this.sectionMode === 'auto' && this.sections.length > 0 && this.currentSectionIndex >= 0) {
+                console.log(`Composer: Auto-advancing to next section after progression completion`);
+                this.advanceToNextSection();
+                return; // advanceToNextSection will publish the new section's first chord
+            }
+        }
 
         this.publishCurrentChord();
 
@@ -598,6 +652,28 @@ export class SonofireComposer extends SonofireBase {
         if (keyboardEl) {
             keyboardEl.innerHTML = this.renderKeyboardGrid();
         }
+
+        // Update section progress bar (if in auto mode)
+        this.updateSectionProgressBar();
+    }
+
+    /**
+     * Update section progress bar to show chord progression completion
+     */
+    updateSectionProgressBar() {
+        if (this.sectionMode !== 'auto' || this.progression.length === 0) return;
+
+        const progressBar = this.$('#section-progress-bar');
+        const progressText = this.$('#section-progress-text');
+
+        if (progressBar && this.progression.length > 0) {
+            const percentage = ((this.progressionIndex + 1) / this.progression.length) * 100;
+            progressBar.style.width = `${percentage}%`;
+        }
+
+        if (progressText) {
+            progressText.textContent = `Chord ${this.progressionIndex + 1}/${this.progression.length}`;
+        }
     }
 
     /**
@@ -683,6 +759,762 @@ export class SonofireComposer extends SonofireBase {
         const voicingSelect = this.$('#voicing-select');
         if (voicingSelect) {
             voicingSelect.value = voicingType;
+        }
+    }
+
+    // ========================================
+    // Manual Chord Progression Entry
+    // ========================================
+
+    /**
+     * Parse manual chord progression text
+     * Handles chord symbols like "C#m7", "Dbm7", "A7", "Fmaj7", etc.
+     * @param {string} text - Chord progression text (space-separated)
+     * @returns {Array} Array of chord objects
+     */
+    parseManualProgression(text) {
+        const chordTokens = text.trim().split(/\s+/);
+        const progression = [];
+
+        const useFlats = this.shouldUseFlats(this.poolKey);
+
+        chordTokens.forEach(token => {
+            const parsed = this.parseChordSymbol(token, useFlats);
+            if (parsed) {
+                progression.push(parsed);
+            } else {
+                console.warn(`Composer: Could not parse chord "${token}"`);
+            }
+        });
+
+        return progression;
+    }
+
+    /**
+     * Parse individual chord symbol
+     * @param {string} symbol - Chord symbol (e.g., "C#m7", "Bb7", "Fmaj7")
+     * @param {boolean} useFlats - Whether to canonicalize to flats
+     * @returns {object|null} Chord object or null if invalid
+     */
+    parseChordSymbol(symbol, useFlats = false) {
+        // Chord symbol regex: captures root note and quality
+        // Root: [A-G][#♯b♭]?
+        // Quality: (m|min|maj|dim|aug|sus)?\d*
+        const chordRegex = /^([A-G])([#♯b♭]?)(.*)?$/;
+        const match = symbol.match(chordRegex);
+
+        if (!match) return null;
+
+        const rootLetter = match[1];
+        let accidental = match[2];
+        const quality = match[3] || '';
+
+        // Normalize accidentals
+        if (accidental === '♯') accidental = '#';
+        if (accidental === '♭') accidental = 'b';
+
+        // Convert to pitch class (0-11)
+        const letterToPitchClass = { 'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11 };
+        let pitchClass = letterToPitchClass[rootLetter];
+
+        if (accidental === '#') {
+            pitchClass = (pitchClass + 1) % 12;
+        } else if (accidental === 'b') {
+            pitchClass = (pitchClass - 1 + 12) % 12;
+        }
+
+        // Canonicalize root name based on pool notation
+        const canonicalRoot = this.pitchClassToNoteName(pitchClass, useFlats);
+
+        // Parse quality
+        const parsedQuality = this.parseChordQuality(quality);
+
+        // Find MIDI note (use middle octave as reference)
+        const rootNote = 60 + pitchClass - (60 % 12); // C4 = 60, adjust to correct pitch class
+
+        // Determine degree in current pool (if available)
+        const degree = this.findDegreeInPool(pitchClass);
+
+        return {
+            symbol: canonicalRoot + parsedQuality,
+            root: rootNote,
+            quality: parsedQuality,
+            degree: degree,
+            poolKey: this.poolKey,
+            mode: 'manual' // Flag to indicate manually entered
+        };
+    }
+
+    /**
+     * Convert pitch class to note name
+     * @param {number} pitchClass - Pitch class (0-11)
+     * @param {boolean} useFlats - Use flats vs sharps
+     * @returns {string} Note name
+     */
+    pitchClassToNoteName(pitchClass, useFlats = false) {
+        const sharpNames = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+        const flatNames = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
+        return useFlats ? flatNames[pitchClass] : sharpNames[pitchClass];
+    }
+
+    /**
+     * Parse chord quality string
+     * @param {string} quality - Quality string (e.g., "m7", "maj7", "dim", "7")
+     * @returns {string} Normalized quality
+     */
+    parseChordQuality(quality) {
+        if (!quality || quality === '') return ''; // Major triad
+
+        // Normalize common variations
+        const normalized = quality
+            .replace(/minor|min/i, 'm')
+            .replace(/major|maj/i, 'maj')
+            .replace(/diminished|dim/i, 'dim')
+            .replace(/augmented|aug/i, 'aug')
+            .replace(/dominant|dom/i, '');
+
+        return normalized;
+    }
+
+    /**
+     * Find degree of pitch class in current pool
+     * @param {number} pitchClass - Pitch class (0-11)
+     * @returns {number} Degree (1-7) or 1 if not found
+     */
+    findDegreeInPool(pitchClass) {
+        const pool = harmonicContext.getNotePool(this.poolKey || '0');
+        const poolPitchClasses = [...new Set(pool.map(n => n % 12))];
+
+        // Map pool to major tonic to find ordered degrees
+        const poolToMajorTonic = {
+            '0': 0, '1♯': 7, '2♯': 2, '3♯': 9, '4♯': 4, '5♯': 11, '6♯': 6,
+            '1♭': 5, '2♭': 10, '3♭': 3, '4♭': 8, '5♭': 1
+        };
+        const majorTonicPC = poolToMajorTonic[this.poolKey] || 0;
+
+        const orderedPitchClasses = [];
+        for (let i = 0; i < 7; i++) {
+            const pc = (majorTonicPC + [0, 2, 4, 5, 7, 9, 11][i]) % 12;
+            if (poolPitchClasses.includes(pc)) {
+                orderedPitchClasses.push(pc);
+            }
+        }
+
+        const degreeIndex = orderedPitchClasses.indexOf(pitchClass);
+        return degreeIndex >= 0 ? degreeIndex + 1 : 1;
+    }
+
+    /**
+     * Set progression from manual text input
+     * @param {string} text - Manual chord progression text
+     */
+    setManualProgression(text) {
+        const progression = this.parseManualProgression(text);
+        if (progression.length > 0) {
+            this.progression = progression;
+            this.progressionLength = progression.length;
+            this.progressionIndex = 0;
+            this.publishCurrentChord();
+            this.updateProgressionDisplay();
+            console.log(`Composer: Set manual progression:`, progression.map(c => c.symbol).join(' → '));
+        }
+    }
+
+    // ========================================
+    // Section Management
+    // ========================================
+
+    /**
+     * Capture current state as a new section
+     * Captures context topic values and playhead positions
+     * @param {string} name - Section name
+     * @returns {Promise<object>} Created section
+     */
+    async captureCurrentStateAsSection(name) {
+        const section = {
+            id: `section-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            name: name,
+
+            // Capture context topics
+            contextTopics: {
+                'context:progression': {
+                    progression: [...this.progression],
+                    progressionIndex: this.progressionIndex,  // Current chord position
+                    progressionLength: this.progressionLength,
+                    style: this.progressionStyle,
+                    barsPerChord: this.barsPerChord,
+                    voicingType: this.voicingType
+                },
+                'context:mood': { mood: this.getLastValue('context:mood')?.mood || 'relaxed' },
+                'context:density': { density: this.getLastValue('context:density')?.density || 0.5 },
+                'context:pool': {
+                    poolKey: this.poolKey || '0',
+                    tonicNote: this.tonicNote || 60,
+                    tonicName: this.tonicName || 'C',
+                    notes: this.getLastValue('context:pool')?.notes || []
+                },
+                'context:timeSignature': {
+                    timeSignature: this.getLastValue('context:timeSignature')?.timeSignature || '4/4',
+                    sixteenthsPerBar: this.getLastValue('context:timeSignature')?.sixteenthsPerBar || 16
+                },
+                'context:tempo': {
+                    bpm: this.getLastValue('clock:tempo')?.bpm || 120
+                },
+                'context:mute': {
+                    mutes: this.captureCurrentMutes()
+                },
+                'context:bassist': this.captureInstrumentalistSettings('sonofire-bassist'),
+                'context:drummer': this.captureInstrumentalistSettings('sonofire-drummer'),
+                'context:soloist': this.captureInstrumentalistSettings('sonofire-soloist'),
+                'context:keyboardist': this.captureInstrumentalistSettings('sonofire-keyboardist')
+            },
+
+            // Capture playhead states (not whippable - manual save/restore)
+            playheadStates: this.capturePlayheadStates(),
+
+            // Capture Y-zoom states from visualizers
+            yZoomStates: this.captureYZoomStates(),
+
+            // Capture whip bindings (await async operation)
+            whipBindings: await this.captureWhipBindings()
+        };
+
+        this.sections.push(section);
+        this.saveSections();
+        this.render();
+
+        console.log(`Composer: Captured section "${name}":`, section);
+
+        return section;
+    }
+
+    /**
+     * Overwrite an existing section with current state
+     * @param {number} index - Section index to overwrite
+     * @param {string} name - Section name
+     * @returns {Promise<void>}
+     */
+    async overwriteSection(index, name) {
+        const section = {
+            id: this.sections[index].id,  // Keep existing ID
+            name: name,
+
+            // Capture current context topics
+            contextTopics: {
+                'context:progression': {
+                    progression: [...this.progression],
+                    progressionIndex: this.progressionIndex,
+                    progressionLength: this.progressionLength,
+                    style: this.progressionStyle,
+                    barsPerChord: this.barsPerChord,
+                    voicingType: this.voicingType
+                },
+                'context:mood': { mood: this.getLastValue('context:mood')?.mood || 'relaxed' },
+                'context:density': { density: this.getLastValue('context:density')?.density || 0.5 },
+                'context:pool': {
+                    poolKey: this.poolKey || '0',
+                    tonicNote: this.tonicNote || 60,
+                    tonicName: this.tonicName || 'C',
+                    notes: this.getLastValue('context:pool')?.notes || []
+                },
+                'context:timeSignature': {
+                    timeSignature: this.getLastValue('context:timeSignature')?.timeSignature || '4/4',
+                    sixteenthsPerBar: this.getLastValue('context:timeSignature')?.sixteenthsPerBar || 16
+                },
+                'context:tempo': {
+                    bpm: this.getLastValue('clock:tempo')?.bpm || 120
+                },
+                'context:mute': {
+                    mutes: this.captureCurrentMutes()
+                },
+                'context:bassist': this.captureInstrumentalistSettings('sonofire-bassist'),
+                'context:drummer': this.captureInstrumentalistSettings('sonofire-drummer'),
+                'context:soloist': this.captureInstrumentalistSettings('sonofire-soloist'),
+                'context:keyboardist': this.captureInstrumentalistSettings('sonofire-keyboardist')
+            },
+
+            // Capture playhead states
+            playheadStates: this.capturePlayheadStates(),
+
+            // Capture Y-zoom states from visualizers
+            yZoomStates: this.captureYZoomStates(),
+
+            // Capture whip bindings (await async operation)
+            whipBindings: await this.captureWhipBindings()
+        };
+
+        // Replace the section at this index
+        this.sections[index] = section;
+        this.saveSections();
+        this.render();
+
+        console.log(`Composer: Overwrote section "${name}" at index ${index}:`, section);
+    }
+
+    /**
+     * Capture current mute states from all instrumentalists
+     * @returns {object} Map of component IDs to mute states
+     */
+    captureCurrentMutes() {
+        const mutes = {};
+
+        // Query all instrumentalist elements in DOM
+        const instrumentalists = document.querySelectorAll('sonofire-drummer, sonofire-bassist, sonofire-soloist, sonofire-keyboardist');
+
+        instrumentalists.forEach(inst => {
+            const id = inst.getComponentId ? inst.getComponentId() : (inst.id || inst.tagName.toLowerCase());
+            mutes[id] = inst.muted || false;
+        });
+
+        return mutes;
+    }
+
+    /**
+     * Capture instrumentalist-specific settings
+     * @param {string} tagName - Tag name of instrumentalist (e.g., 'sonofire-bassist')
+     * @returns {object} Settings object for this instrumentalist
+     */
+    captureInstrumentalistSettings(tagName) {
+        const inst = document.querySelector(tagName);
+
+        if (!inst) {
+            return {}; // Instrumentalist not present
+        }
+
+        const settings = {};
+
+        // Bassist settings
+        if (tagName === 'sonofire-bassist') {
+            settings.motionType = inst.motionType || 'root-5th';
+            settings.rhythmPattern = inst.rhythmPattern || null;
+            settings.transpose = inst.transpose || 0;
+            settings.humanizationEnabled = inst.humanizationEnabled !== undefined ? inst.humanizationEnabled : true;
+            settings.humanizationIntensity = inst.humanizationIntensity !== undefined ? inst.humanizationIntensity : 0.7;
+        }
+
+        // Drummer settings
+        else if (tagName === 'sonofire-drummer') {
+            settings.drumStyle = inst.drumStyle || 'rock';
+            settings.humanizationEnabled = inst.humanizationEnabled !== undefined ? inst.humanizationEnabled : true;
+            settings.humanizationIntensity = inst.humanizationIntensity !== undefined ? inst.humanizationIntensity : 0.7;
+            settings.swingAmount = inst.swingAmount !== undefined ? inst.swingAmount : 0.0;
+        }
+
+        // Soloist settings
+        else if (tagName === 'sonofire-soloist') {
+            settings.playingStyle = inst.playingStyle || 'melodic';
+            settings.noteRange = inst.noteRange || 'mid';
+            settings.maxInterval = inst.maxInterval || 7;
+            // Soloist may not have humanization implemented yet
+            if (inst.humanizationEnabled !== undefined) {
+                settings.humanizationEnabled = inst.humanizationEnabled;
+                settings.humanizationIntensity = inst.humanizationIntensity || 0.7;
+            }
+        }
+
+        // Keyboardist settings
+        else if (tagName === 'sonofire-keyboardist') {
+            settings.instrumentStyle = inst.instrumentStyle || 'piano';
+            settings.playingApproach = inst.playingApproach || 'comping';
+            settings.humanizationEnabled = inst.humanizationEnabled !== undefined ? inst.humanizationEnabled : true;
+            settings.humanizationIntensity = inst.humanizationIntensity !== undefined ? inst.humanizationIntensity : 0.6;
+        }
+
+        return settings;
+    }
+
+    /**
+     * Capture playhead states from all visualizers
+     * @returns {Array} Array of playhead state objects
+     */
+    capturePlayheadStates() {
+        const states = [];
+
+        // Query all visualizers
+        const visualizers = document.querySelectorAll('sonofire-xy-plot');
+
+        visualizers.forEach(viz => {
+            if (viz.playheads) {
+                viz.playheads.forEach(playhead => {
+                    states.push({
+                        visualizerId: viz.getVisualizerId(),
+                        playheadId: playhead.id,
+                        position: playhead.position,
+                        enabled: playhead.enabled,
+                        speed: playhead.speed
+                    });
+                });
+            }
+        });
+
+        return states;
+    }
+
+    /**
+     * Capture Y-axis zoom states from all visualizers
+     * @returns {Array} Array of Y-zoom state objects
+     */
+    captureYZoomStates() {
+        const states = [];
+
+        // Query all visualizers
+        const visualizers = document.querySelectorAll('sonofire-xy-plot');
+
+        visualizers.forEach(viz => {
+            const visualizerId = viz.getVisualizerId ? viz.getVisualizerId() : viz.id;
+
+            // Get Y-zoom state from visualizer
+            if (viz.yZoomLevel !== undefined && viz.yZoomCenter !== undefined) {
+                states.push({
+                    visualizerId: visualizerId,
+                    zoomLevel: viz.yZoomLevel,
+                    zoomCenter: viz.yZoomCenter
+                });
+            }
+        });
+
+        return states;
+    }
+
+    /**
+     * Capture all current whip bindings
+     * @returns {Array} Array of binding JSON objects
+     */
+    async captureWhipBindings() {
+        try {
+            const { WhipManager } = await import('../../lib/whip_manager.js');
+
+            // Get all current bindings
+            const bindings = WhipManager.getAllBindings();
+
+            // Convert each binding to JSON
+            const bindingsData = bindings.map(binding => binding.toJSON());
+
+            console.log(`Composer: Captured ${bindingsData.length} whip binding(s)`);
+
+            return bindingsData;
+        } catch (error) {
+            console.error('Composer: Error capturing whip bindings:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Load a section by publishing its context topics
+     * @param {number} sectionIndex - Section index to load
+     */
+    loadSection(sectionIndex) {
+        if (sectionIndex < 0 || sectionIndex >= this.sections.length) return;
+
+        const section = this.sections[sectionIndex];
+        this.currentSectionIndex = sectionIndex;
+
+        console.log(`Composer: Loading section "${section.name}"`, section);
+
+        // Directly restore progression state (don't rely on subscription handler)
+        const progressionData = section.contextTopics['context:progression'];
+        if (progressionData) {
+            this.progression = progressionData.progression;
+            this.progressionStyle = progressionData.style;
+            this.barsPerChord = progressionData.barsPerChord;
+            this.voicingType = progressionData.voicingType;
+            this.progressionLength = progressionData.progressionLength;
+            // ALWAYS start at first chord when loading a section
+            this.progressionIndex = 0;
+        }
+
+        // Directly restore pool/tonic state (don't rely on subscription handler)
+        const poolData = section.contextTopics['context:pool'];
+        if (poolData) {
+            this.poolKey = poolData.poolKey;
+            this.tonicNote = poolData.tonicNote;
+            this.tonicName = poolData.tonicName;
+        }
+
+        // Publish all context topics for this section (for other components)
+        for (const [topic, data] of Object.entries(section.contextTopics)) {
+            this.publish(topic, data);
+        }
+
+        // Publish current chord (now that progression is loaded)
+        this.publishCurrentChord();
+
+        // Restore playhead positions (manual restore - not whippable)
+        this.restorePlayheadStates(section.playheadStates);
+
+        // Restore Y-zoom states from visualizers
+        if (section.yZoomStates) {
+            this.restoreYZoomStates(section.yZoomStates);
+        }
+
+        // Optionally restore whip bindings
+        if (section.whipBindings && section.whipBindings.length > 0) {
+            this.restoreWhipBindings(section.whipBindings);
+        }
+
+        // Publish section change event
+        this.publish('context:section', {
+            sectionId: section.id,
+            sectionName: section.name,
+            sectionIndex: sectionIndex
+        });
+
+        // Update UI to show loaded section and progression
+        this.render();
+    }
+
+    /**
+     * Restore playhead states
+     * @param {Array} states - Array of playhead state objects
+     */
+    restorePlayheadStates(states) {
+        states.forEach(state => {
+            const viz = document.getElementById(state.visualizerId) ||
+                       document.querySelector(`sonofire-xy-plot[data-visualizer-id="${state.visualizerId}"]`);
+
+            if (viz && viz.getPlayhead) {
+                const playhead = viz.getPlayhead(state.playheadId);
+                if (playhead) {
+                    playhead.setPosition(state.position);
+                    playhead.setEnabled(state.enabled);
+                    playhead.setSpeed(state.speed);
+                }
+            }
+        });
+
+        // CRITICAL: Delay sampling to ensure whip bindings are restored and data is ready
+        // This gives time for:
+        // 1. Whip bindings to be registered
+        // 2. Visualizer data to be fully available
+        // 3. Event detection system to be ready
+        setTimeout(() => {
+            states.forEach(state => {
+                const viz = document.getElementById(state.visualizerId) ||
+                           document.querySelector(`sonofire-xy-plot[data-visualizer-id="${state.visualizerId}"]`);
+
+                if (viz && viz.getPlayhead) {
+                    const playhead = viz.getPlayhead(state.playheadId);
+
+                    if (playhead && playhead.enabled && viz.sampleDataAtPlayhead) {
+                        // Force playhead to re-sample data at new position
+                        // This triggers event detection and whip bindings
+                        viz.sampleDataAtPlayhead(playhead);
+                    }
+                }
+            });
+
+            // Trigger visual update after all playheads sampled
+            states.forEach(state => {
+                const viz = document.getElementById(state.visualizerId) ||
+                           document.querySelector(`sonofire-xy-plot[data-visualizer-id="${state.visualizerId}"]`);
+
+                if (viz && viz.onPlayheadsAdvanced) {
+                    viz.onPlayheadsAdvanced();
+                }
+            });
+        }, 100); // 100ms delay to ensure everything is ready
+    }
+
+    /**
+     * Restore Y-zoom states for visualizers
+     * @param {Array} states - Array of Y-zoom state objects
+     */
+    restoreYZoomStates(states) {
+        states.forEach(state => {
+            const viz = document.getElementById(state.visualizerId) ||
+                       document.querySelector(`sonofire-xy-plot[data-visualizer-id="${state.visualizerId}"]`);
+
+            if (viz) {
+                // Publish Y-zoom state to the visualizer's specific topic
+                // The visualizer will subscribe to this and update accordingly
+                const topic = `visualizer:${state.visualizerId}:yzoom`;
+                this.publish(topic, {
+                    zoomLevel: state.zoomLevel,
+                    zoomCenter: state.zoomCenter,
+                    timestamp: Date.now()
+                });
+
+                console.log(`Composer: Restored Y-zoom for ${state.visualizerId}: level=${state.zoomLevel.toFixed(2)}, center=${state.zoomCenter.toFixed(2)}`);
+            }
+        });
+    }
+
+    /**
+     * Restore whip bindings (optional)
+     * @param {Array} bindingsData - Array of binding JSON objects
+     */
+    async restoreWhipBindings(bindingsData) {
+        const { WhipManager } = await import('../../lib/whip_manager.js');
+        const { WhipBinding } = await import('../../lib/whip_binding.js');
+
+        // Clear existing bindings
+        WhipManager.clearAllBindings();
+
+        // Restore saved bindings
+        bindingsData.forEach(data => {
+            const binding = WhipBinding.fromJSON(data);
+            WhipManager.registerBinding(binding);
+        });
+    }
+
+    /**
+     * Navigate to next section
+     */
+    nextSection() {
+        if (this.sections.length === 0) return;
+
+        if (this.sectionMode === 'manual') {
+            const nextIndex = (this.currentSectionIndex + 1) % this.sections.length;
+            this.loadSection(nextIndex);
+        }
+    }
+
+    /**
+     * Navigate to previous section
+     */
+    previousSection() {
+        if (this.sections.length === 0) return;
+
+        if (this.sectionMode === 'manual') {
+            const prevIndex = (this.currentSectionIndex - 1 + this.sections.length) % this.sections.length;
+            this.loadSection(prevIndex);
+        }
+    }
+
+    /**
+     * Delete section
+     * @param {number} sectionIndex - Section index to delete
+     */
+    deleteSection(sectionIndex) {
+        this.sections.splice(sectionIndex, 1);
+
+        if (this.currentSectionIndex >= this.sections.length) {
+            this.currentSectionIndex = Math.max(-1, this.sections.length - 1);
+        }
+
+        this.saveSections();
+        this.render();
+    }
+
+    /**
+     * Edit section - rename
+     * @param {number} sectionIndex - Section index to edit
+     */
+    editSection(sectionIndex) {
+        const section = this.sections[sectionIndex];
+        if (!section) return;
+
+        const newName = prompt('Section name:', section.name);
+
+        if (newName && newName !== section.name) {
+            // Check if name already exists (excluding current section)
+            const existingIndex = this.sections.findIndex((s, i) => s.name === newName && i !== sectionIndex);
+
+            if (existingIndex >= 0) {
+                alert(`A section named "${newName}" already exists. Please choose a different name.`);
+                return;
+            }
+
+            // Update section name
+            section.name = newName;
+            this.saveSections();
+            this.render();
+
+            console.log(`Composer: Renamed section at index ${sectionIndex} to "${newName}"`);
+        }
+    }
+
+    /**
+     * Reorder section - move from one index to another
+     * @param {number} fromIndex - Source index
+     * @param {number} toIndex - Destination index
+     */
+    reorderSection(fromIndex, toIndex) {
+        if (fromIndex === toIndex) return;
+
+        // Remove section from old position
+        const [movedSection] = this.sections.splice(fromIndex, 1);
+
+        // Insert at new position
+        this.sections.splice(toIndex, 0, movedSection);
+
+        // Update currentSectionIndex to track the same section
+        if (this.currentSectionIndex === fromIndex) {
+            // The current section was moved
+            this.currentSectionIndex = toIndex;
+        } else if (fromIndex < this.currentSectionIndex && toIndex >= this.currentSectionIndex) {
+            // Moved section from before current to after current
+            this.currentSectionIndex--;
+        } else if (fromIndex > this.currentSectionIndex && toIndex <= this.currentSectionIndex) {
+            // Moved section from after current to before current
+            this.currentSectionIndex++;
+        }
+
+        this.saveSections();
+        this.render();
+
+        console.log(`Composer: Reordered section "${movedSection.name}" from index ${fromIndex} to ${toIndex}`);
+    }
+
+    /**
+     * Advance to next section in auto mode
+     * Uses arrangementOrder if defined, otherwise linear progression
+     */
+    advanceToNextSection() {
+        if (this.sections.length === 0) return;
+
+        if (this.arrangementOrder.length > 0) {
+            // Use arrangement order (e.g., [0, 1, 0, 2, 1] for verse-chorus-verse-bridge-chorus)
+            this.arrangementIndex = (this.arrangementIndex + 1) % this.arrangementOrder.length;
+            const nextSectionIndex = this.arrangementOrder[this.arrangementIndex];
+            this.loadSection(nextSectionIndex);
+        } else {
+            // Linear progression through sections (wrap around at end)
+            const nextIndex = (this.currentSectionIndex + 1) % this.sections.length;
+            this.loadSection(nextIndex);
+        }
+
+        console.log(`Composer: Auto-advanced to section "${this.sections[this.currentSectionIndex]?.name}"`);
+    }
+
+    /**
+     * Save sections to PubSub/localStorage
+     */
+    saveSections() {
+        this.publish('composer:sections', {
+            sections: this.sections,
+            currentSectionIndex: this.currentSectionIndex,
+            sectionMode: this.sectionMode,
+            arrangementOrder: this.arrangementOrder
+        });
+    }
+
+    /**
+     * Restore sections from PubSub/localStorage
+     */
+    restoreSections() {
+        const state = this.getLastValue('composer:sections');
+        if (state) {
+            this.sections = state.sections || [];
+            this.currentSectionIndex = state.currentSectionIndex ?? -1;
+            this.sectionMode = state.sectionMode || 'manual';
+            this.arrangementOrder = state.arrangementOrder || [];
+
+            console.log(`Composer: Restored ${this.sections.length} section(s)`);
+
+            // Re-render to show sections in UI
+            if (this.isConnected) {
+                this.render();
+            }
+
+            // If there was a current section, load it to restore the musical state
+            if (this.currentSectionIndex >= 0 && this.currentSectionIndex < this.sections.length) {
+                console.log(`Composer: Auto-loading section ${this.currentSectionIndex} at startup`);
+                // Use setTimeout to ensure this happens after component is fully initialized
+                setTimeout(() => {
+                    this.loadSection(this.currentSectionIndex);
+                }, 0);
+            }
         }
     }
 
@@ -857,6 +1689,115 @@ export class SonofireComposer extends SonofireBase {
     }
 
     /**
+     * Render section controls UI
+     * @returns {string} HTML for section controls
+     */
+    renderSectionControls() {
+        const currentSection = this.currentSectionIndex >= 0 ? this.sections[this.currentSectionIndex] : null;
+        const sectionName = currentSection?.name || 'No section';
+
+        return `
+            <div style="margin-bottom: 15px; padding: 10px; background: #1e1e1e; border-radius: 4px;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <strong style="color: #dcdcaa;">Song Sections</strong>
+
+                    <!-- Mode selector -->
+                    <select id="section-mode-select" style="padding: 4px; background: #3c3c3c; color: #d4d4d4; border: 1px solid #555;">
+                        <option value="manual" ${this.sectionMode === 'manual' ? 'selected' : ''}>Manual</option>
+                        <option value="auto" ${this.sectionMode === 'auto' ? 'selected' : ''}>Auto</option>
+                    </select>
+
+                    <!-- Navigation -->
+                    <button id="prev-section-btn" style="padding: 4px 8px; background: #0e639c; color: white; border: none; cursor: pointer;">◀ Prev</button>
+                    <span style="color: #4ec9b0; font-weight: bold;">${sectionName}</span>
+                    <button id="next-section-btn" style="padding: 4px 8px; background: #0e639c; color: white; border: none; cursor: pointer;">Next ▶</button>
+
+                    <!-- Capture current state -->
+                    <button id="capture-section-btn" style="padding: 4px 8px; background: #608b4e; color: white; border: none; cursor: pointer;">📸 Capture</button>
+
+                    <!-- Section index whippable target -->
+                    <span style="margin-left: auto;">Section Index ${this.getTargetLightHTML('sectionIndex')}</span>
+                </div>
+
+                <!-- Progress bar (for auto mode) - shows chord progression completion -->
+                ${this.sectionMode === 'auto' && currentSection && this.progression.length > 0 ? `
+                    <div style="background: #3c3c3c; height: 4px; border-radius: 2px; overflow: hidden;">
+                        <div id="section-progress-bar" style="background: #4ec9b0; height: 100%; width: ${((this.progressionIndex + 1) / this.progression.length) * 100}%;"></div>
+                    </div>
+                    <div id="section-progress-text" style="color: #888; font-size: 11px; text-align: center; margin-top: 2px;">
+                        Chord ${this.progressionIndex + 1}/${this.progression.length}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    /**
+     * Get friendly label for bars per chord value
+     * @param {number} value - Bars per chord value
+     * @returns {string} Friendly label
+     */
+    getBarsPerChordLabel(value) {
+        const labels = {
+            8: '8 bars',
+            7: '7 bars',
+            6: '6 bars',
+            5: '5 bars',
+            4: '4 bars',
+            3: '3 bars',
+            2: '2 bars',
+            1: '1 bar',
+            0.5: '2 beats',
+            0.25: '1 beat'
+        };
+        return labels[value] || `${value} bars`;
+    }
+
+    /**
+     * Render section list UI
+     * @returns {string} HTML for section list
+     */
+    renderSectionList() {
+        if (this.sections.length === 0) {
+            return '<div style="color: #888; font-size: 11px; margin-bottom: 10px;">No sections defined. Click "Capture" to save current state.</div>';
+        }
+
+        return `
+            <div style="margin-bottom: 15px; max-height: 200px; overflow-y: auto;">
+                ${this.sections.map((section, index) => {
+                    const progression = section.contextTopics['context:progression'];
+                    const barsPerChordLabel = this.getBarsPerChordLabel(progression.barsPerChord);
+                    return `
+                    <div class="section-item" data-section-index="${index}" draggable="true" style="
+                        padding: 8px;
+                        margin: 4px 0;
+                        background: ${index === this.currentSectionIndex ? '#264f78' : '#252526'};
+                        border-left: 3px solid ${index === this.currentSectionIndex ? '#4ec9b0' : '#555'};
+                        cursor: move;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    ">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="color: #888; cursor: grab; user-select: none;" title="Drag to reorder">⠿</span>
+                            <div>
+                                <strong style="color: #dcdcaa;">${section.name}</strong>
+                                <span style="color: #888; font-size: 11px; margin-left: 10px;">
+                                    ${progression.progression.length} chords @ ${barsPerChordLabel}
+                                </span>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 5px;">
+                            <button class="edit-section-btn" data-section-index="${index}" style="padding: 2px 6px; background: #0e639c; color: white; border: none; cursor: pointer; font-size: 11px;">✏️</button>
+                            <button class="delete-section-btn" data-section-index="${index}" style="padding: 2px 6px; background: #d16969; color: white; border: none; cursor: pointer; font-size: 11px;">🗑️</button>
+                        </div>
+                    </div>
+                `}).join('')}
+            </div>
+        `;
+    }
+
+    /**
      * Render the composer UI
      */
     render() {
@@ -865,6 +1806,12 @@ export class SonofireComposer extends SonofireBase {
         this.innerHTML = `
             <div style="background: #2d2d2d; padding: 15px; margin: 10px 0; border-left: 3px solid #569cd6;">
                 <h3 style="margin: 0 0 10px 0; color: #569cd6;">🎹 Composer</h3>
+
+                <!-- Section Controls -->
+                ${this.renderSectionControls()}
+
+                <!-- Section List -->
+                ${this.renderSectionList()}
 
                 <!-- Piano Keyboard Grid -->
                 <div style="margin-bottom: 15px; padding: 10px; background: #1e1e1e; border-radius: 4px; overflow-x: auto;">
@@ -890,9 +1837,21 @@ export class SonofireComposer extends SonofireBase {
                     <button id="regenerate-btn" style="margin-left: 10px;">Regenerate</button>
                 </div>
 
+                <!-- Manual Progression Entry -->
+                <div style="margin-bottom: 10px;">
+                    <strong>Manual Entry:</strong>
+                    <input type="text" id="manual-progression-input"
+                           placeholder="e.g., C#m7 F#m7 G#m7 A7"
+                           style="width: 300px; padding: 4px; font-family: monospace;">
+                    <button id="set-manual-progression-btn" style="margin-left: 5px;">Set Progression</button>
+                    <span style="color: #888; font-size: 0.85em; margin-left: 10px;">Space-separated chord symbols</span>
+                </div>
+
                 <div style="margin-bottom: 10px;">
                     <strong>Bars per Chord ${this.getTargetLightHTML('barsPerChord')}:</strong>
-                    <input type="number" id="bars-per-chord-input" value="${this.barsPerChord}" min="1" max="16" style="width: 60px;">
+                    <select id="bars-per-chord-select" style="padding: 4px;">
+                        ${this.renderBarsPerChordOptions()}
+                    </select>
                     <strong style="margin-left: 15px;">Voicing ${this.getTargetLightHTML('voicingType')}:</strong>
                     <select id="voicing-select">
                         ${this.renderVoicingOptions()}
@@ -927,6 +1886,144 @@ export class SonofireComposer extends SonofireBase {
      * Setup event handlers
      */
     setupEventHandlers() {
+        // Section mode selector
+        const modeSelect = this.$('#section-mode-select');
+        if (modeSelect) {
+            modeSelect.onchange = (e) => {
+                this.sectionMode = e.target.value;
+                this.saveSections();
+                this.render();
+            };
+        }
+
+        // Section navigation
+        const prevSectionBtn = this.$('#prev-section-btn');
+        if (prevSectionBtn) {
+            prevSectionBtn.onclick = () => this.previousSection();
+        }
+
+        const nextSectionBtn = this.$('#next-section-btn');
+        if (nextSectionBtn) {
+            nextSectionBtn.onclick = () => this.nextSection();
+        }
+
+        // Capture section
+        const captureBtn = this.$('#capture-section-btn');
+        if (captureBtn) {
+            captureBtn.onclick = async () => {
+                const name = prompt('Section name:', `Section ${this.sections.length + 1}`);
+                if (name) {
+                    // Check if a section with this name already exists
+                    const existingIndex = this.sections.findIndex(s => s.name === name);
+
+                    if (existingIndex >= 0) {
+                        // Section with this name exists - warn user
+                        const overwrite = confirm(
+                            `A section named "${name}" already exists.\n\n` +
+                            `Click OK to overwrite the existing section, or Cancel to enter a different name.`
+                        );
+
+                        if (overwrite) {
+                            // Overwrite existing section (await async operation)
+                            await this.overwriteSection(existingIndex, name);
+                        }
+                        // If not confirmed, do nothing (user can try again with different name)
+                    } else {
+                        // New section - create it (await async operation)
+                        await this.captureCurrentStateAsSection(name);
+                    }
+                }
+            };
+        }
+
+        // Section item clicks (load section)
+        this.querySelectorAll('.section-item').forEach(item => {
+            item.onclick = (e) => {
+                // Don't trigger if clicking edit or delete button
+                if (e.target.classList.contains('delete-section-btn') ||
+                    e.target.classList.contains('edit-section-btn')) {
+                    return;
+                }
+                const index = parseInt(item.dataset.sectionIndex);
+                this.loadSection(index);
+            };
+        });
+
+        // Edit section buttons
+        this.querySelectorAll('.edit-section-btn').forEach(btn => {
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                const index = parseInt(btn.dataset.sectionIndex);
+                this.editSection(index);
+            };
+        });
+
+        // Delete section buttons
+        this.querySelectorAll('.delete-section-btn').forEach(btn => {
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                const index = parseInt(btn.dataset.sectionIndex);
+                const section = this.sections[index];
+                if (confirm(`Delete section "${section.name}"?`)) {
+                    this.deleteSection(index);
+                }
+            };
+        });
+
+        // Drag/drop reordering for sections
+        let draggedSectionIndex = null;
+
+        this.querySelectorAll('.section-item').forEach(item => {
+            // Dragstart - store which section is being dragged
+            item.addEventListener('dragstart', (e) => {
+                draggedSectionIndex = parseInt(item.dataset.sectionIndex);
+                item.style.opacity = '0.4';
+                e.dataTransfer.effectAllowed = 'move';
+            });
+
+            // Dragend - reset opacity
+            item.addEventListener('dragend', (e) => {
+                item.style.opacity = '1';
+                draggedSectionIndex = null;
+            });
+
+            // Dragover - allow drop by preventing default
+            item.addEventListener('dragover', (e) => {
+                if (e.preventDefault) {
+                    e.preventDefault();
+                }
+                e.dataTransfer.dropEffect = 'move';
+
+                // Visual feedback: add border highlight
+                item.style.borderTop = '2px solid #4ec9b0';
+                return false;
+            });
+
+            // Dragleave - remove border highlight
+            item.addEventListener('dragleave', (e) => {
+                item.style.borderTop = '';
+            });
+
+            // Drop - reorder sections
+            item.addEventListener('drop', (e) => {
+                if (e.stopPropagation) {
+                    e.stopPropagation();
+                }
+
+                item.style.borderTop = '';
+
+                const dropIndex = parseInt(item.dataset.sectionIndex);
+
+                if (draggedSectionIndex !== null && draggedSectionIndex !== dropIndex) {
+                    // Perform the reorder
+                    this.reorderSection(draggedSectionIndex, dropIndex);
+                }
+
+                return false;
+            });
+        });
+
+        // Progression controls
         this.$('#style-select').onchange = (e) => {
             this.setProgressionStyle(e.target.value);
             // No render() - setProgressionStyle() already updates dropdown and progression display
@@ -937,13 +2034,35 @@ export class SonofireComposer extends SonofireBase {
             this.render();
         };
 
+        // Manual progression entry
+        const manualProgressionInput = this.$('#manual-progression-input');
+        const setManualBtn = this.$('#set-manual-progression-btn');
+        if (manualProgressionInput && setManualBtn) {
+            setManualBtn.onclick = () => {
+                const text = manualProgressionInput.value.trim();
+                if (text) {
+                    this.setManualProgression(text);
+                }
+            };
+
+            // Also allow Enter key
+            manualProgressionInput.onkeydown = (e) => {
+                if (e.key === 'Enter') {
+                    const text = manualProgressionInput.value.trim();
+                    if (text) {
+                        this.setManualProgression(text);
+                    }
+                }
+            };
+        }
+
         this.$('#progression-length-input').onchange = (e) => {
             const newLength = parseInt(e.target.value);
             this.setProgressionLength(newLength);
         };
 
-        this.$('#bars-per-chord-input').onchange = (e) => {
-            this.barsPerChord = parseInt(e.target.value);
+        this.$('#bars-per-chord-select').onchange = (e) => {
+            this.barsPerChord = parseFloat(e.target.value);
             console.log(`Composer: Bars per chord set to ${this.barsPerChord}`);
         };
 
@@ -978,6 +2097,24 @@ export class SonofireComposer extends SonofireBase {
         ];
         return styles.map(([value, label]) =>
             `<option value="${value}" ${value === this.progressionStyle ? 'selected' : ''}>${label}</option>`
+        ).join('');
+    }
+
+    renderBarsPerChordOptions() {
+        const options = [
+            [8, '8 bars'],
+            [7, '7 bars'],
+            [6, '6 bars'],
+            [5, '5 bars'],
+            [4, '4 bars'],
+            [3, '3 bars'],
+            [2, '2 bars'],
+            [1, '1 bar'],
+            [0.5, '2 beats'],
+            [0.25, '1 beat']
+        ];
+        return options.map(([value, label]) =>
+            `<option value="${value}" ${value === this.barsPerChord ? 'selected' : ''}>${label}</option>`
         ).join('');
     }
 

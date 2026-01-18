@@ -17,6 +17,13 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
 
         // Track recently sampled data indices per playhead to avoid re-sampling
         this.recentlySampledIndices = new Map(); // playheadId -> Set of indices
+
+        // Y-domain zoom state
+        this.yZoomLevel = 1.0; // 1.0 = full range, 0.1 = 10% of range (zoomed in)
+        this.yZoomCenter = 0.5; // 0.0 = bottom, 1.0 = top, 0.5 = center
+        this.autoYDomain = null; // Store auto-detected Y domain for reset
+        this._isRestoringZoom = false; // Flag to prevent circular updates
+        this._zoomRenderTimeout = null; // Debounce timer for zoom rendering
     }
 
     /**
@@ -26,13 +33,40 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         // Detect container dimensions before rendering
         this.detectContainerDimensions();
 
-        // Create container
+        // Discover zoom state from PubSub before rendering
+        this.discoverYZoomState();
+
+        // Create container with zoom slider
         this.innerHTML = `
-            <div id="my_dataviz"></div>
+            <div style="display: flex; align-items: stretch;">
+                <div id="y-zoom-controls" style="display: flex; flex-direction: column; width: 40px; margin-right: 5px;">
+                    <!-- Zoom slider will be added here -->
+                </div>
+                <div id="my_dataviz" style="flex: 1;"></div>
+            </div>
         `;
 
         // Render graph
         await this.renderGraph();
+
+        // Render zoom controls after graph is ready
+        this.renderYZoomControls();
+    }
+
+    /**
+     * Discover Y-zoom state from PubSub on initialization
+     */
+    discoverYZoomState() {
+        const visualizerId = this.getVisualizerId();
+        const zoomData = this.getLastValue(`visualizer:${visualizerId}:yzoom`);
+
+        if (zoomData) {
+            console.log(`XY Plot: Discovered Y-zoom state for ${visualizerId}:`, zoomData);
+            this._isRestoringZoom = true;
+            this.yZoomLevel = zoomData.zoomLevel;
+            this.yZoomCenter = zoomData.zoomCenter;
+            this._isRestoringZoom = false;
+        }
     }
 
     /**
@@ -72,150 +106,27 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
     }
 
     /**
+     * Cleanup when component is disconnected
+     */
+    disconnectedCallback() {
+        // Clear any pending zoom render timeout
+        if (this._zoomRenderTimeout) {
+            clearTimeout(this._zoomRenderTimeout);
+            this._zoomRenderTimeout = null;
+        }
+
+        // Call parent cleanup
+        if (super.disconnectedCallback) {
+            super.disconnectedCallback();
+        }
+    }
+
+    /**
      * Load data from CSV
      */
     async loadData() {
         return await d3.csv(this.dataUrl);
     }
-
-    /**
-     * Render the D3 graph
-     */
-    async renderGraph() {
-        // Clear existing graph
-        const existingSvg = this.$('#my_dataviz svg');
-        if (existingSvg) {
-            existingSvg.remove();
-        }
-
-        // Calculate scale partitions (note boundaries)
-        const partitions = this.calculateScalePartitions(
-            this.scale,
-            this.scaleTones,
-            this.scaleRoot,
-            this.octaves
-        );
-
-        this.dataBoundaries = [];
-
-        // Create SVG
-        const svg = d3.select(this.$('#my_dataviz'))
-            .append('svg')
-            .attr('width', this.width + this.margin.left + this.margin.right)
-            .attr('height', this.height + this.margin.top + this.margin.bottom)
-            .append('g')
-            .attr('transform', `translate(${this.margin.left},${this.margin.top})`);
-
-        this.svg = svg;
-
-        // Load data first to enable auto-detection
-        const data = await this.loadData();
-        this.data = data;
-
-        const getX = (d) => new Date(d[this.xColumn]);
-        const getY = (d) => parseFloat(d[this.yColumn]);
-
-        // Store data accessors for sampling
-        this.getX = getX;
-        this.getY = getY;
-
-        // Determine X domain (manual override or auto-detect)
-        let xDomain;
-        if (this.xDomainOverride) {
-            xDomain = this.xDomainOverride;
-            console.log('XY Plot: Using manual X domain:', xDomain);
-        } else {
-            // Auto-detect from data
-            xDomain = d3.extent(data, getX);
-            console.log('XY Plot: Auto-detected X domain:', xDomain);
-        }
-
-        // Add X axis
-        const x = d3.scaleTime()
-            .domain(xDomain)
-            .range([0, this.width]);
-
-        // Store scales for data sampling
-        this.xScale = x;
-        this.xDomain = x.domain();
-
-        svg.append('g')
-            .attr('transform', `translate(0,${this.height})`)
-            .call(d3.axisBottom(x));
-
-        // Determine Y domain (manual override or auto-detect)
-        let yDomain;
-        if (this.yDomainOverride) {
-            yDomain = this.yDomainOverride;
-            console.log('XY Plot: Using manual Y domain:', yDomain);
-        } else {
-            // Auto-detect from data with 5% padding
-            const [yMin, yMax] = d3.extent(data, getY);
-            const yPadding = (yMax - yMin) * 0.05;
-            yDomain = [yMin - yPadding, yMax + yPadding];
-            console.log('XY Plot: Auto-detected Y domain:', yDomain);
-        }
-
-        // Add Y axis
-        const y = d3.scaleLinear()
-            .domain(yDomain)
-            .range([this.height, 0]);
-
-        this.yScale = y;
-
-        svg.append('g')
-            .call(d3.axisLeft(y));
-
-        // Draw note boundary rectangles
-        for (let i = 0; i < partitions.length; i++) {
-            const opacity = i % 2 === 0 ? '0.1' : '0.00';
-            const upperBoundary = (i + 1) * (this.height / partitions.length);
-            const lowerBoundary = i * (this.height / partitions.length);
-
-            this.dataBoundaries.push({
-                lowerBoundary,
-                upperBoundary,
-                note: partitions[i]
-            });
-
-            svg.append('rect')
-                .attr('fill', `rgba(0, 0, 0, ${opacity})`)
-                .attr('x', 0)
-                .attr('width', this.width)
-                .attr('y', lowerBoundary)
-                .attr('height', upperBoundary - lowerBoundary);
-        }
-
-        // Clear recently sampled tracking when data reloads
-        this.recentlySampledIndices.clear();
-
-        // Plot data points
-        svg.append('g')
-            .selectAll('dot')
-            .data(data)
-            .enter()
-            .append('circle')
-            .attr('cx', (d) => x(getX(d)))
-            .attr('cy', (d) => y(getY(d)))
-            .attr('class', (d) => {
-                let noteBoundary = '';
-                const yPos = y(getY(d));
-
-                // Find which note boundary this point falls into
-                for (let i = 0; i < this.dataBoundaries.length; i++) {
-                    if (yPos >= this.dataBoundaries[i].lowerBoundary &&
-                        yPos < this.dataBoundaries[i].upperBoundary) {
-                        noteBoundary = `note-${this.dataBoundaries[i].note}`;
-                        break;
-                    }
-                }
-
-                return `x-${parseInt(x(getX(d)))} ${noteBoundary}`;
-            })
-            .attr('r', 1.5)
-            .style('fill', '#69b3a2');
-    }
-
 
     /**
      * Override: Advance a specific playhead's position (domain-based)
@@ -458,7 +369,7 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
     }
 
     /**
-     * Setup subscriptions including chord change for lookahead
+     * Setup subscriptions including chord change for lookahead and zoom state
      */
     setupSubscriptions() {
         super.setupSubscriptions();
@@ -467,6 +378,55 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         this.subscribe('music:chord', (chordData) => {
             this.handleChordChangeForLookahead(chordData);
         });
+
+        // Subscribe to Y-zoom state changes for this visualizer
+        const visualizerId = this.getVisualizerId();
+        this.subscribe(`visualizer:${visualizerId}:yzoom`, (zoomData) => {
+            this.handleYZoomChange(zoomData);
+        });
+    }
+
+    /**
+     * Handle Y-zoom state change from PubSub
+     */
+    handleYZoomChange(zoomData) {
+        // Only update if the values are different (avoid circular updates)
+        const zoomLevelChanged = Math.abs(this.yZoomLevel - zoomData.zoomLevel) > 0.001;
+        const zoomCenterChanged = Math.abs(this.yZoomCenter - zoomData.zoomCenter) > 0.001;
+
+        if (zoomLevelChanged || zoomCenterChanged) {
+            // Set flag to prevent re-publishing during update
+            this._isRestoringZoom = true;
+
+            this.yZoomLevel = zoomData.zoomLevel;
+            this.yZoomCenter = zoomData.zoomCenter;
+
+            // Update the slider if it exists
+            const slider = this.$('input[type="range"]');
+            if (slider) {
+                slider.value = this.yZoomLevel;
+            }
+
+            // Apply zoom
+            this.updateYDomainFromZoom();
+
+            this._isRestoringZoom = false;
+        }
+    }
+
+    /**
+     * Publish Y-zoom state to PubSub
+     */
+    publishYZoomState() {
+        const visualizerId = this.getVisualizerId();
+        const zoomData = {
+            zoomLevel: this.yZoomLevel,
+            zoomCenter: this.yZoomCenter,
+            timestamp: Date.now()
+        };
+
+        this.publish(`visualizer:${visualizerId}:yzoom`, zoomData);
+        console.log(`XY Plot: Published Y-zoom state for ${visualizerId}:`, zoomData);
     }
 
     /**
@@ -528,6 +488,11 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         // Remove old playhead visuals
         parent.selectAll('.multi-playhead').remove();
         parent.selectAll('.playhead-indicator-triangle').remove();
+
+        // Guard: Don't render if scales aren't set up yet
+        if (!this.xDomain || !this.xScale) {
+            return;
+        }
 
         // Render each playhead
         this.playheads.forEach((playhead, index) => {
@@ -624,6 +589,180 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
     }
 
     /**
+     * Render Y-axis zoom controls (vertical slider + zoom buttons)
+     */
+    renderYZoomControls() {
+        const container = this.$('#y-zoom-controls');
+        if (!container) return;
+
+        // Clear existing controls
+        container.innerHTML = '';
+
+        // Create slider container (takes up most of the height)
+        const sliderContainer = document.createElement('div');
+        sliderContainer.style.cssText = `
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px 0;
+            position: relative;
+        `;
+
+        // Create vertical range slider for zoom level
+        // Range from 0.2 to 3.6, with midpoint at 1.0 (auto-detected range)
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0.2';
+        slider.max = '3.6';
+        slider.step = '0.05';
+        slider.value = this.yZoomLevel;
+        slider.orient = 'vertical'; // For older browsers (non-standard but supported)
+        slider.style.cssText = `
+            writing-mode: vertical-lr;
+            direction: rtl;
+            -webkit-appearance: slider-vertical; /* Fallback for older WebKit */
+            appearance: auto; /* Modern standard */
+            width: 100%; /* This becomes the visual height when rotated */
+            height: 8px; /* This becomes the visual width when rotated */
+            margin: 0;
+            cursor: pointer;
+        `;
+        slider.title = 'Y-axis zoom level (drag to zoom)';
+
+        // Update zoom when slider changes (debounced for smooth dragging)
+        slider.addEventListener('input', (e) => {
+            this.yZoomLevel = parseFloat(e.target.value);
+            this.debouncedUpdateYDomainFromZoom();
+        });
+
+        sliderContainer.appendChild(slider);
+        container.appendChild(sliderContainer);
+
+        // Create buttons container at bottom
+        const buttonsContainer = document.createElement('div');
+        buttonsContainer.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            padding: 5px 0;
+        `;
+
+        // Zoom in button (decrease zoom level = zoom in)
+        const zoomInBtn = document.createElement('button');
+        zoomInBtn.textContent = '+';
+        zoomInBtn.title = 'Zoom in (Y-axis)';
+        zoomInBtn.style.cssText = `
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        `;
+        zoomInBtn.addEventListener('click', () => {
+            this.yZoomLevel = Math.max(0.2, this.yZoomLevel - 0.1);
+            slider.value = this.yZoomLevel;
+            this.debouncedUpdateYDomainFromZoom();
+        });
+
+        // Zoom out button (increase zoom level = zoom out)
+        const zoomOutBtn = document.createElement('button');
+        zoomOutBtn.textContent = '−';
+        zoomOutBtn.title = 'Zoom out (Y-axis)';
+        zoomOutBtn.style.cssText = `
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        `;
+        zoomOutBtn.addEventListener('click', () => {
+            this.yZoomLevel = Math.min(3.6, this.yZoomLevel + 0.1);
+            slider.value = this.yZoomLevel;
+            this.debouncedUpdateYDomainFromZoom();
+        });
+
+        // Reset button
+        const resetBtn = document.createElement('button');
+        resetBtn.textContent = '⟲';
+        resetBtn.title = 'Reset Y-axis zoom';
+        resetBtn.style.cssText = `
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 14px;
+        `;
+        resetBtn.addEventListener('click', () => {
+            this.yZoomLevel = 1.0;
+            this.yZoomCenter = 0.5;
+            slider.value = this.yZoomLevel;
+            this.debouncedUpdateYDomainFromZoom();
+        });
+
+        buttonsContainer.appendChild(zoomInBtn);
+        buttonsContainer.appendChild(zoomOutBtn);
+        buttonsContainer.appendChild(resetBtn);
+        container.appendChild(buttonsContainer);
+    }
+
+    /**
+     * Debounced version of updateYDomainFromZoom for smooth slider interaction
+     * Delays graph re-render by 50ms to batch rapid zoom changes
+     */
+    debouncedUpdateYDomainFromZoom() {
+        // Clear existing timeout
+        if (this._zoomRenderTimeout) {
+            clearTimeout(this._zoomRenderTimeout);
+        }
+
+        // Set new timeout to render after 50ms
+        this._zoomRenderTimeout = setTimeout(() => {
+            this.updateYDomainFromZoom();
+            this._zoomRenderTimeout = null;
+        }, 50);
+    }
+
+    /**
+     * Update Y domain based on current zoom level and center
+     * Then re-render the graph (but not zoom controls)
+     */
+    updateYDomainFromZoom() {
+        if (!this.autoYDomain) return;
+
+        const [autoMin, autoMax] = this.autoYDomain;
+        const autoRange = autoMax - autoMin;
+
+        // Calculate new range based on zoom level
+        const newRange = autoRange * this.yZoomLevel;
+
+        // Calculate center point in data coordinates
+        const centerValue = autoMin + (autoRange * this.yZoomCenter);
+
+        // Calculate new domain centered on centerValue
+        const newMin = centerValue - (newRange / 2);
+        const newMax = centerValue + (newRange / 2);
+
+        // Update Y domain override
+        this.yDomainOverride = [newMin, newMax];
+
+        // Re-render graph with new Y domain
+        this.renderGraph();
+
+        // Publish zoom state to PubSub for persistence (unless we're restoring)
+        if (!this._isRestoringZoom) {
+            this.publishYZoomState();
+        }
+
+        console.log(`Y-axis zoom: level=${this.yZoomLevel.toFixed(2)}, domain=[${newMin.toFixed(2)}, ${newMax.toFixed(2)}]`);
+    }
+
+    /**
      * Override renderGraph to include playhead rendering
      */
     async renderGraph() {
@@ -652,6 +791,16 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
             .attr('transform', `translate(${this.margin.left},${this.margin.top})`);
 
         this.svg = svg;
+
+        // Add clip path to prevent data points from appearing outside axes
+        svg.append('defs')
+            .append('clipPath')
+            .attr('id', `clip-${this.getVisualizerId()}`)
+            .append('rect')
+            .attr('x', 0)
+            .attr('y', 0)
+            .attr('width', this.width)
+            .attr('height', this.height);
 
         // Load data first to enable auto-detection
         const data = await this.loadData();
@@ -698,6 +847,12 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
             const [yMin, yMax] = d3.extent(data, getY);
             const yPadding = (yMax - yMin) * 0.05;
             yDomain = [yMin - yPadding, yMax + yPadding];
+
+            // Store auto-detected domain for zoom controls (only if not already stored)
+            if (!this.autoYDomain) {
+                this.autoYDomain = yDomain;
+            }
+
             console.log('XY Plot: Auto-detected Y domain:', yDomain);
         }
 
@@ -734,8 +889,9 @@ export class SonofireXYPlot extends SonofireVisualizerBase {
         // Clear recently sampled tracking when data reloads
         this.recentlySampledIndices.clear();
 
-        // Plot data points
+        // Plot data points (with clipping to prevent overflow)
         svg.append('g')
+            .attr('clip-path', `url(#clip-${this.getVisualizerId()})`)
             .selectAll('dot')
             .data(data)
             .enter()

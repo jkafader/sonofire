@@ -66,6 +66,28 @@ export class SonofireConductor extends SonofireBase {
     setupSubscriptions() {
         super.setupSubscriptions();
 
+        // Subscribe to tempo changes from sections
+        this.subscribe('context:tempo', (data) => {
+            if (data.bpm && data.bpm !== this.tempo) {
+                this.setTempo(data.bpm);
+            }
+        }, this);
+
+        // Subscribe to pool/tonic changes from sections
+        this.subscribe('context:pool', (data) => {
+            if (data.poolKey && data.tonicName) {
+                // Check if values actually changed to avoid infinite loops
+                if (data.poolKey !== this.poolKey || data.tonicName !== this.tonicName) {
+                    this.poolKey = data.poolKey;
+                    this.tonicName = data.tonicName;
+                    this.tonicNote = data.tonicNote;
+
+                    // Update UI dropdowns
+                    this.updatePoolTonicDropdowns();
+                }
+            }
+        }, this);
+
         if (this.mode === 'auto') {
             // In auto mode, listen to data events to adjust mood/density
             this.subscribe('data:forecast', (msg) => {

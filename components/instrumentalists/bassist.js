@@ -18,6 +18,7 @@ export class SonofireBassist extends BaseInstrumentalist {
         this.rhythmPattern = null;        // Manual rhythm pattern selection (null = use motion type's pattern)
         this.timeSignature = '4/4';       // '2/4', '3/4', '4/4', '5/4', '6/8'
         this.sixteenthsPerBar = 16;       // Calculated from time signature
+        this.transpose = 0;               // Transpose offset: 0, +12, +24, +36 (octaves up)
 
         // Note range settings - FIXED to first 3 bass strings (E1, A1, D2) up to 12th fret
         this.minNote = 28;                // E1 (first string open)
@@ -951,6 +952,28 @@ export class SonofireBassist extends BaseInstrumentalist {
             this.regenerateRhythmPattern(); // Regenerate pattern for new time signature
             this.renderThrottled();
         });
+
+        // Subscribe to bassist settings from sections
+        this.subscribe('context:bassist', (data) => {
+            if (data.motionType && data.motionType !== this.motionType) {
+                this.motionType = data.motionType;
+                this.regenerateRhythmPattern();
+            }
+            if (data.rhythmPattern !== undefined && data.rhythmPattern !== this.rhythmPattern) {
+                this.rhythmPattern = data.rhythmPattern;
+                this.regenerateRhythmPattern();
+            }
+            if (data.transpose !== undefined && data.transpose !== this.transpose) {
+                this.transpose = data.transpose;
+            }
+            if (data.humanizationEnabled !== undefined && data.humanizationEnabled !== this.humanizationEnabled) {
+                this.humanizationEnabled = data.humanizationEnabled;
+            }
+            if (data.humanizationIntensity !== undefined && data.humanizationIntensity !== this.humanizationIntensity) {
+                this.humanizationIntensity = data.humanizationIntensity;
+            }
+            this.renderThrottled();
+        }, this);
     }
 
     /**
@@ -1017,6 +1040,28 @@ export class SonofireBassist extends BaseInstrumentalist {
                 this.humanizationIntensity = value;
             }
         });
+
+        // 5. Transpose (select) - octave shift control
+        this.registerWhippableParameter('transpose', {
+            label: 'Transpose',
+            parameterType: 'select',
+            options: [0, 12, 24, 36],
+            elementSelector: '#transpose-select',
+            icon: '🎚️',
+            setter: (value) => {
+                const options = [0, 12, 24, 36];
+                const index = Math.floor(value * options.length);
+                const newTranspose = options[Math.min(index, options.length - 1)];
+
+                if (newTranspose !== this.transpose) {
+                    this.transpose = newTranspose;
+                    const select = this.$('#transpose-select');
+                    if (select) {
+                        select.value = newTranspose;
+                    }
+                }
+            }
+        });
     }
 
     /**
@@ -1046,7 +1091,7 @@ export class SonofireBassist extends BaseInstrumentalist {
         const velocity = Math.max(40, this.accentVelocity - 20); // Lower than pattern
         const duration = 200;
 
-        this.sendNote(note, velocity, duration);
+        this.sendNote(note + this.transpose, velocity, duration);
         this.lastNote = note;
     }
 
@@ -1099,7 +1144,7 @@ export class SonofireBassist extends BaseInstrumentalist {
         if (note) {
             const velocity = 90;
             const duration = 400;
-            this.sendNote(note, velocity, duration);
+            this.sendNote(note + this.transpose, velocity, duration);
             this.currentBassNote = note;
         }
     }
@@ -1179,19 +1224,28 @@ export class SonofireBassist extends BaseInstrumentalist {
             finalVelocity += Math.round(velocityHumanization);
             finalVelocity = Math.max(30, Math.min(127, finalVelocity));
 
-            // Calculate timing offset
-            const microTimingOffset = this.calculateMicroTimingOffset(position);
+            // Play note immediately (no timing offset)
+            // setTimeout is too unreliable for musical timing - causes drift and lateness
+            // Humanization is achieved via velocity variation only
 
-            // Play note with timing offset
-            const duration = 400;
+            // Calculate adaptive duration to prevent note overlap on monophonic synths
+            // Duration = time until next likely note * decay factor
+            const sixteenthNoteDuration = (60000 / (this.getLastValue('clock:tempo')?.bpm || 120)) / 4;
 
-            if (microTimingOffset !== 0) {
-                setTimeout(() => {
-                    this.sendNote(note, finalVelocity, duration);
-                }, Math.max(0, microTimingOffset));
-            } else {
-                this.sendNote(note, finalVelocity, duration);
+            // Base duration on note spacing in pattern
+            let minNoteSpacing = 16; // Assume sparsest pattern
+            for (let i = 1; i <= 15; i++) {
+                const nextPos = (position + i) % pattern.length;
+                if (pattern[nextPos] === 1) {
+                    minNoteSpacing = i;
+                    break;
+                }
             }
+
+            // Duration = 80% of time to next note (leaves gap for monophonic synths)
+            const duration = Math.floor(minNoteSpacing * sixteenthNoteDuration * 0.8);
+
+            this.sendNote(note + this.transpose, finalVelocity, duration);
 
             this.lastNote = note;
         }
@@ -1390,6 +1444,10 @@ export class SonofireBassist extends BaseInstrumentalist {
                     <select id="rhythm-pattern-select" style="margin: 0 5px;">
                         ${this.renderRhythmPatternOptions()}
                     </select>
+                    | Transpose ${this.getTargetLightHTML('transpose')}:
+                    <select id="transpose-select" style="margin: 0 5px;">
+                        ${this.renderTransposeOptions()}
+                    </select>
                     | Density ${this.getTargetLightHTML('density')}:
                     <input type="range" id="density-slider" min="0" max="100" value="${this.density * 100}" style="width: 100px; vertical-align: middle;">
                     <span style="margin-left: 5px;">${Math.round(this.density * 100)}%</span>
@@ -1437,6 +1495,14 @@ export class SonofireBassist extends BaseInstrumentalist {
             const value = e.target.value;
             this.rhythmPattern = (value === 'auto') ? null : value;
             this.regenerateRhythmPattern();
+        };
+
+        const transposeSelect = this.$('#transpose-select');
+        transposeSelect.onfocus = () => this.startUIInteraction();
+        transposeSelect.onblur = () => this.endUIInteraction();
+        transposeSelect.onchange = (e) => {
+            this.transpose = parseInt(e.target.value);
+            this.endUIInteraction();
         };
 
         const densitySlider = this.$('#density-slider');
@@ -1526,6 +1592,22 @@ export class SonofireBassist extends BaseInstrumentalist {
             const selected = value === this.noteRange ? 'selected' : '';
             return `<option value="${value}" ${selected}>${label}</option>`;
         }).join('');
+    }
+
+    /**
+     * Render transpose selector options
+     * @returns {string} HTML options for transpose selector
+     */
+    renderTransposeOptions() {
+        const options = [
+            [0, 'Normal'],
+            [12, '+1 Octave'],
+            [24, '+2 Octaves'],
+            [36, '+3 Octaves']
+        ];
+        return options.map(([value, label]) =>
+            `<option value="${value}" ${value === this.transpose ? 'selected' : ''}>${label}</option>`
+        ).join('');
     }
 }
 

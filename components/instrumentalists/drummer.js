@@ -629,6 +629,24 @@ export class SonofireDrummer extends BaseInstrumentalist {
             this.selectGroove(); // Regenerate pattern for new time signature
             this.renderThrottled();
         });
+
+        // Subscribe to drummer settings from sections
+        this.subscribe('context:drummer', (data) => {
+            if (data.drumStyle && data.drumStyle !== this.drumStyle) {
+                this.drumStyle = data.drumStyle;
+                this.selectGroove();
+            }
+            if (data.humanizationEnabled !== undefined && data.humanizationEnabled !== this.humanizationEnabled) {
+                this.humanizationEnabled = data.humanizationEnabled;
+            }
+            if (data.humanizationIntensity !== undefined && data.humanizationIntensity !== this.humanizationIntensity) {
+                this.humanizationIntensity = data.humanizationIntensity;
+            }
+            if (data.swingAmount !== undefined && data.swingAmount !== this.swingAmount) {
+                this.swingAmount = data.swingAmount;
+            }
+            this.renderThrottled();
+        }, this);
     }
 
     /**

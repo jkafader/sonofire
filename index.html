@@ -80,31 +80,12 @@
 <body>
     <h1>Sonofire: Data Sonification System</h1>
 
-    <div class="info">
-        <div>
-            <!--button onclick="initAudio()">Initialize Audio Outputs</button-->
-            <script>
-                function checkForInitialization(){
-                    if(typeof initAudio != "undefined"){
-                        initAudio();
-                    } else {
-                        window.setTimeout(checkForInitialization, 100);
-                    }
-                }
-                window.setTimeout(checkForInitialization, 100);
-            </script>
-            <label style="margin-left: 15px;">
-                <input type="checkbox" id="midi-toggle" checked onchange="toggleMIDI(this.checked)">
-                MIDI Output
-            </label>
-            <label style="margin-left: 10px;">
-                <input type="checkbox" id="webaudio-toggle" onchange="toggleWebAudio(this.checked)">
-                WebAudio Output
-            </label>
-        <button class="panic" style="margin-left: 30px;" onclick="midiPanic()">🚨 PANIC</button>
-        </div>
-        <div id="status">Audio: Not initialized</div>
-    </div>
+    <!-- Output Control Component -->
+    <sonofire-output-control
+        data-midi-enabled="true"
+        data-midi-clock-enabled="false"
+        data-webaudio-enabled="false">
+    </sonofire-output-control>
 
     <!-- Control Components (Using new Pool/Tonic notation) -->
     <!-- pools are e.g. 3♯, 2♯, 5♭, 0 -->
@@ -194,7 +175,7 @@
     </sonofire-drummer>
 
     <sonofire-bassist
-        data-channel="1"
+        data-channel="10"
         data-bass-style="roots"
         data-note-range="mid-low"
         data-density="0.75"
@@ -207,6 +188,7 @@
         import { WhipManager } from './lib/whip_manager.js';
         import { WhipDragHandler } from './lib/whip_drag_handler.js';
         import './components/ui/whip_target_light.js';
+        import './components/controllers/output_control.js';
         import './components/controllers/conductor.js';
         import './components/controllers/composer.js';
         import './components/visualizers/xy_plot.js';
@@ -219,40 +201,9 @@
         WhipManager.initialize();
         WhipDragHandler.initialize();
 
-        // Make available globally for buttons
+        // Make available globally for components
         window.audioRouter = audioRouter;
         window.PubSub = PubSub;
-        audioRouter.setWebAudioEnabled(false);
-
-        // Status updates
-        const statusEl = document.getElementById('status');
-
-        function updateStatus() {
-            const audioConfig = audioRouter.getConfig();
-            const audioStatus = `MIDI: ${audioConfig.midi ? 'ON' : 'OFF'}, WebAudio: ${audioConfig.webAudio ? 'ON' : 'OFF'}`;
-            statusEl.textContent = `Audio: ${audioStatus}`;
-        }
-
-        window.initAudio = async () => {
-            await audioRouter.initialize();
-            updateStatus();
-        };
-
-        window.toggleMIDI = (enabled) => {
-            audioRouter.setMIDIEnabled(enabled);
-            updateStatus();
-        };
-
-        window.toggleWebAudio = (enabled) => {
-            audioRouter.setWebAudioEnabled(enabled);
-            updateStatus();
-        };
-
-        window.midiPanic = async () => {
-            console.log('🚨 MIDI PANIC triggered by user');
-            await audioRouter.panic();
-            console.log('🚨 MIDI PANIC completed');
-        };
 
         // Subscribe to events for debugging
         PubSub.subscribe('data:point', (data) => {
@@ -275,9 +226,6 @@
                 console.log('TEST: clock:tick received in index.html:', data.tick);
             }
         });*/
-
-        // Initial status
-        updateStatus();
     </script>
 </body>
 </html>

@@ -141,6 +141,26 @@ export class SonofireSoloist extends BaseInstrumentalist {
                 this.handleForecastData(data);
             });
         }
+
+        // Subscribe to soloist settings from sections
+        this.subscribe('context:soloist', (data) => {
+            if (data.playingStyle && data.playingStyle !== this.playingStyle) {
+                this.playingStyle = data.playingStyle;
+            }
+            if (data.noteRange && data.noteRange !== this.noteRange) {
+                this.setNoteRange(data.noteRange);
+            }
+            if (data.maxInterval !== undefined && data.maxInterval !== this.maxInterval) {
+                this.maxInterval = data.maxInterval;
+            }
+            if (data.humanizationEnabled !== undefined && data.humanizationEnabled !== this.humanizationEnabled) {
+                this.humanizationEnabled = data.humanizationEnabled;
+            }
+            if (data.humanizationIntensity !== undefined && data.humanizationIntensity !== this.humanizationIntensity) {
+                this.humanizationIntensity = data.humanizationIntensity;
+            }
+            this.renderThrottled();
+        }, this);
     }
 
     /**
