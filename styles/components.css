@@ -1,0 +1,320 @@
+/**
+ * Sonofire Component Styles
+ * Global CSS for consistent UI across all components
+ */
+
+/* ===== Buttons ===== */
+.sf-button, .sf-component button {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: opacity 0.2s ease;
+}
+
+.sf-button:hover {
+    opacity: 0.85;
+}
+
+.sf-button:active {
+    opacity: 0.7;
+}
+
+/* Button variants by component color */
+.sf-button-rhythm {
+    background: #f39c12;
+    color: white;
+}
+
+.sf-button-melody {
+    background: #9b59b6;
+    color: white;
+}
+
+.sf-button-conductor {
+    background: #4ec9b0;
+    color: white;
+}
+
+.sf-button-success {
+    background: #27ae60;
+    color: white;
+}
+
+.sf-button-danger {
+    background: #e74c3c;
+    color: white;
+}
+
+.sf-button-secondary {
+    background: #0e639c;
+    color: white;
+}
+
+.sf-button-instrumentalist {
+    background: #ce9178;
+    color: white;
+}
+
+.sf-button-soloist {
+    background: #ce9178;
+    color: white;
+}
+
+.sf-button-keyboardist {
+    background: #9cdcfe;
+    color: #1e1e1e;
+}
+
+.sf-button-drummer {
+    background: #d7ba7d;
+    color: #1e1e1e;
+}
+
+.sf-button-bassist {
+    background: #608b4e;
+    color: white;
+}
+
+/* ===== Inputs ===== */
+.sf-input {
+    padding: 4px;
+    background: #3c3c3c;
+    min-width:30px;
+    color: #d4d4d4;
+    border: 1px solid #555;
+    border-radius: 4px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.sf-input:focus {
+    border-color: #4ec9b0;
+}
+
+.sf-input[type="number"] {
+    width: 60px;
+}
+
+/* ===== Select Dropdowns ===== */
+.sf-select {
+    padding: 4px;
+    background: #3c3c3c;
+    color: #d4d4d4;
+    border: 1px solid #555;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.sf-select:focus {
+    border-color: #4ec9b0;
+}
+
+.sf-select:hover {
+    border-color: #666;
+}
+
+/* ===== Labels ===== */
+.sf-label {
+    color: #dcdcaa;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+/* ===== Control Groups ===== */
+.sf-controls {
+    display: flex;
+    gap: 15px;
+    margin: 10px 0;
+    align-items: center;
+    flex-wrap: wrap;
+    background: #1e1e1e;
+    padding: 5px 15px;
+    border-radius: 4px;
+}
+
+/* ===== Component Containers ===== */
+.sf-component {
+    background: #2d2d2d;
+    padding: 15px;
+    margin: 5px 0;
+    border-radius: 4px;
+}
+
+.sf-component-rhythm {
+    border-left: 3px solid #f39c12;
+}
+
+.sf-component-melody {
+    border-left: 3px solid #9b59b6;
+}
+
+.sf-component-conductor {
+    border-left: 3px solid #4ec9b0;
+}
+
+.sf-component-instrumentalist {
+    border-left: 3px solid #ce9178;
+}
+
+.sf-component-soloist {
+    border-left: 3px solid #ce9178;
+}
+
+.sf-component-keyboardist {
+    border-left: 3px solid #9cdcfe;
+}
+
+.sf-component-drummer {
+    border-left: 3px solid #d7ba7d;
+}
+
+.sf-component-bassist {
+    border-left: 3px solid #608b4e;
+}
+
+.sf-component.output-control button {
+    background-color: #4ec9b0;
+    color: #1e1e1e;
+}
+
+.sf-component table {
+    width:100%;
+    border-collapse: collapse;
+    margin-left: -15px;
+}
+.sf-component th {
+    text-align: left;
+    font-weight: normal;
+    font-size: 10px;
+    padding: 0 10px;
+    border-right: 1px solid #666;
+    padding-bottom:3px;
+}
+.sf-component td {
+    border-right: 1px solid #666;
+    padding: 0 10px;
+}
+.sf-component td:last-child, .sf-component th:last-child {
+    border-right: none;
+}
+
+.sf-component fieldset {
+    margin-top:15px;
+    background: #1e1e1e;
+    border:0;
+    border-radius:5px;
+    padding: 10px 16px;
+    position: relative;
+}
+
+.sf-component fieldset label:first-child {
+    position: absolute;
+    top: -5px;
+    left: 7px;
+    font-size: 10px;
+}
+
+.sf-component input[type="checkbox"] {
+    height:20px;
+    width:20px;
+}
+
+/* ===== Component Headers ===== */
+.sf-component-header {
+    margin: 0 0 10px 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.sf-component-header-rhythm {
+    color: #f39c12;
+}
+
+.sf-component-header-melody {
+    color: #9b59b6;
+}
+
+.sf-component-header-conductor {
+    color: #4ec9b0;
+}
+
+.sf-component-header-instrumentalist {
+    color: #ce9178;
+}
+
+.sf-component-header-soloist {
+    color: #ce9178;
+}
+
+.sf-component-header-keyboardist {
+    color: #9cdcfe;
+}
+
+.sf-component-header-drummer {
+    color: #d7ba7d;
+}
+
+.sf-component-header-bassist {
+    color: #608b4e;
+}
+
+/* ===== Text Colors ===== */
+.sf-text-primary {
+    color: #d4d4d4;
+}
+
+.sf-text-secondary {
+    color: #888;
+}
+
+.sf-text-label {
+    color: #dcdcaa;
+}
+
+.sf-text-rhythm {
+    color: #f39c12;
+}
+
+.sf-text-melody {
+    color: #9b59b6;
+}
+
+.sf-text-conductor {
+    color: #4ec9b0;
+}
+
+.sf-text-instrumentalist {
+    color: #ce9178;
+}
+
+/* ===== Sub-sections ===== */
+.sf-section {
+    margin-bottom: 10px;
+    padding: 10px;
+    background: #252525;
+    border-radius: 4px;
+}
+
+/* ===== Info Text ===== */
+.sf-info-text {
+    color: #888;
+    font-size: 0.9em;
+    font-style: italic;
+}
+
+/* ===== Dividers ===== */
+.sf-divider {
+    height: 1px;
+    background: #444;
+    margin: 15px 0;
+    border: none;
+}

@@ -14,6 +14,8 @@ class SonofireBaseCore extends HTMLElement {
         this.config = {};
         this.subscriptions = []; // Track PubSub subscriptions for cleanup
         this.subscriptionsSetup = false; // Prevent duplicate subscriptions
+        this.subscriptionsPaused = false; // Track if subscriptions are paused during section loading
+        this.sectionRestoreInProgress = false; // Global flag indicating section restore is happening
         this.root = null; // DOM container (could be shadow root or this)
         // Note: this.isConnected is a built-in read-only property, don't override it
     }
@@ -121,8 +123,18 @@ class SonofireBaseCore extends HTMLElement {
      * Subclasses should override to add their subscriptions
      */
     setupSubscriptions() {
-        // Base class has no subscriptions
-        // Subclasses override and add their own
+        // Subscribe to section loading lifecycle (don't track these, they control other subscriptions)
+        PubSub.subscribe('section:loading:start', () => {
+            this.sectionRestoreInProgress = true;
+            this.pauseSubscriptions();
+        }, this);
+
+        PubSub.subscribe('section:loading:complete', () => {
+            this.resumeSubscriptions();
+            this.sectionRestoreInProgress = false;
+        }, this);
+
+        // Subclasses override and add their own subscriptions
     }
 
     /**
@@ -168,14 +180,49 @@ class SonofireBaseCore extends HTMLElement {
      * Cleanup subscriptions and resources
      * Subclasses can override to add additional cleanup
      */
+    /**
+     * Pause all subscriptions (for section loading)
+     * Unsubscribes from all topics but keeps the subscription list for resuming
+     */
+    pauseSubscriptions() {
+        if (this.subscriptionsPaused) return;
+
+        this.subscriptions.forEach(({ topic, callback }) => {
+            PubSub.unsubscribe(topic, callback, this);
+        });
+
+        this.subscriptionsPaused = true;
+    }
+
+    /**
+     * Resume all subscriptions (after section loading)
+     * Re-subscribes to all previously paused topics and triggers a render
+     */
+    resumeSubscriptions() {
+        if (!this.subscriptionsPaused) return;
+
+        this.subscriptions.forEach(({ topic, callback }) => {
+            PubSub.subscribe(topic, callback, this);
+        });
+
+        this.subscriptionsPaused = false;
+
+        // Trigger a single render after resuming to reflect the restored state
+        if (this.render && this.isConnected) {
+            this.render();
+        }
+    }
+
     cleanup() {
         // Reset subscription flag so component can re-subscribe if reconnected
         this.subscriptionsSetup = false;
 
+        // Unsubscribe all
+        this.subscriptions.forEach(({ topic, callback }) => {
+            PubSub.unsubscribe(topic, callback, this);
+        });
+
         // Clear subscription tracking
-        // Note: The existing pubsub.js doesn't have a way to unsubscribe individual callbacks
-        // The callbacks will simply fail silently if called after the component is removed
-        // because the context (this) will be disconnected
         this.subscriptions = [];
     }
 

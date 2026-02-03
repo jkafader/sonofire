@@ -54,6 +54,19 @@ export class SonofireBassist extends BaseInstrumentalist {
 
         // Initialize rhythm pattern
         this.regenerateRhythmPattern();
+
+        // Style-based performance (NEW)
+        this.currentStyle = null;
+        this.styleSettings = {
+            motionType: null,  // Style-override motion type
+            anticipation: 0.0,  // Probability of anticipating chord changes (0-1)
+            slap: false,  // Use slap bass technique
+            walkingBass: false  // Use walking bass
+        };
+
+        // Rhythm planner integration (NEW)
+        this.externalRhythmPattern = null;  // Pattern from rhythm planner
+        this.useExternalRhythm = false;      // Whether to use external rhythm
     }
 
 
@@ -464,6 +477,113 @@ export class SonofireBassist extends BaseInstrumentalist {
     }
 
     /**
+     * Interpret composition style and set bass playing characteristics
+     * @param {string} style - Style identifier (e.g., 'jazz-swing', 'funk', etc.)
+     */
+    interpretStyle(style) {
+        // Reset to defaults
+        this.styleSettings = {
+            motionType: null,
+            anticipation: 0.0,
+            slap: false,
+            walkingBass: false
+        };
+
+        switch (style) {
+            case 'jazz-swing':
+            case 'jazz-bebop':
+                // Walking bass - quarter notes with chromatic approach
+                this.styleSettings.motionType = 'walking-chromatic';
+                this.styleSettings.walkingBass = true;
+                this.styleSettings.anticipation = 0.2;  // Occasional anticipation
+                break;
+
+            case 'jazz-modal':
+                // Pedal tones and roots
+                this.styleSettings.motionType = 'root-5th';
+                this.styleSettings.anticipation = 0.1;
+                break;
+
+            case 'jazz-ballad':
+                // Sparse roots and fifths
+                this.styleSettings.motionType = 'root-5th';
+                this.styleSettings.anticipation = 0.0;  // No anticipation
+                break;
+
+            case 'funk':
+                // Tight syncopated patterns with slap
+                this.styleSettings.motionType = 'funk-syncopated';
+                this.styleSettings.slap = true;
+                this.styleSettings.anticipation = 0.6;  // Heavy anticipation
+                break;
+
+            case 'reggae':
+                // Steady roots on offbeats
+                this.styleSettings.motionType = 'root-only';
+                this.styleSettings.anticipation = 0.0;
+                break;
+
+            case 'latin-bossa':
+                // Syncopated bass tumba pattern
+                this.styleSettings.motionType = 'bossa-tumba';
+                this.styleSettings.anticipation = 0.3;
+                break;
+
+            case 'latin-salsa':
+            case 'latin-samba':
+                // Driving tumba pattern
+                this.styleSettings.motionType = 'salsa-tumba';
+                this.styleSettings.anticipation = 0.4;
+                break;
+
+            case 'blues-12bar':
+            case 'blues-minor':
+                // Shuffle pattern with walking bass
+                this.styleSettings.motionType = 'walking-chromatic';
+                this.styleSettings.walkingBass = true;
+                this.styleSettings.anticipation = 0.1;
+                break;
+
+            case 'rock':
+                // Driving root and fifth pattern
+                this.styleSettings.motionType = 'root-5th';
+                this.styleSettings.anticipation = 0.2;
+                break;
+
+            case 'pop':
+                // Simple root patterns
+                this.styleSettings.motionType = 'root-only';
+                this.styleSettings.anticipation = 0.1;
+                break;
+
+            case 'rnb-soul':
+                // Syncopated with occasional slap
+                this.styleSettings.motionType = 'shell';
+                this.styleSettings.slap = Math.random() < 0.3;  // 30% chance
+                this.styleSettings.anticipation = 0.4;
+                break;
+
+            case 'country':
+                // Alternating root-fifth (boom-chuck)
+                this.styleSettings.motionType = 'root-5th';
+                this.styleSettings.anticipation = 0.1;
+                break;
+
+            default:
+                // No style override
+                break;
+        }
+
+        // Apply style motion type if specified
+        if (this.styleSettings.motionType) {
+            this.motionType = this.styleSettings.motionType;
+        }
+
+        // Regenerate rhythm pattern with new style
+        this.regenerateRhythmPattern();
+    }
+
+    /**
      * Regenerate rhythm pattern based on current motion type and density
      * Called when density or motion type changes
      */
@@ -471,9 +591,13 @@ export class SonofireBassist extends BaseInstrumentalist {
         // Regenerate rhythm layers for current time signature
         this.rhythmLayers = this.defineRhythmLayers(this.timeSignature);
 
+        // Remap density to make low values much sparser
+        // Using 4th power: 0→0, 0.5→6%, 0.8→41%, 0.95→81%
+        const remappedDensity = Math.pow(this.density, 4);
+
         // Use manual rhythm pattern if selected, otherwise use motion type's pattern
         const patternKey = this.rhythmPattern || this.motionType;
-        this.currentRhythmPattern = this.generateRhythmPattern(patternKey, this.density);
+        this.currentRhythmPattern = this.generateRhythmPattern(patternKey, remappedDensity);
     }
 
     /**
@@ -953,6 +1077,22 @@ export class SonofireBassist extends BaseInstrumentalist {
             this.renderThrottled();
         });
 
+        // NEW: Subscribe to composition style from Composer
+        this.subscribe('context:style', (data) => {
+            if (data.style !== this.currentStyle) {
+                this.currentStyle = data.style;
+                this.interpretStyle(data.style);
+                console.log(`Bassist: Interpreting style "${data.style}"`);
+            }
+        }, this);
+
+        // NEW: Subscribe to rhythm pattern from planner
+        this.subscribe('rhythm:pattern', (data) => {
+            this.externalRhythmPattern = data.pattern;
+            this.useExternalRhythm = true;
+            console.log('Bassist: Received external rhythm pattern');
+        }, this);
+
         // Subscribe to bassist settings from sections
         this.subscribe('context:bassist', (data) => {
             if (data.motionType && data.motionType !== this.motionType) {
@@ -1201,7 +1341,34 @@ export class SonofireBassist extends BaseInstrumentalist {
         }
 
         // Get current rhythm pattern
-        const { pattern, velocity } = this.currentRhythmPattern;
+        let { pattern, velocity } = this.currentRhythmPattern;
+
+        // NEW: Override with external rhythm pattern if available
+        let velocityBoost = 0;
+        if (this.useExternalRhythm && this.externalRhythmPattern) {
+            // Remap density to make low values much sparser
+            // Using 4th power: 0→0, 0.5→6%, 0.8→41%, 0.95→81%
+            // This makes density 0% very sparse and current 0% behavior appear at ~95%
+            const remappedDensity = Math.pow(this.density, 4);
+
+            // Select density layer based on remapped density
+            const layerIndex = Math.min(
+                Math.floor(remappedDensity * this.externalRhythmPattern.layers.length),
+                this.externalRhythmPattern.layers.length - 1
+            );
+            const selectedLayer = this.externalRhythmPattern.layers[layerIndex];
+
+            // Use external pattern if available
+            if (selectedLayer && selectedLayer.pattern && selectedLayer.pattern.length > 0) {
+                // Convert boolean pattern to numeric pattern for compatibility
+                pattern = selectedLayer.pattern.map(v => v ? 1 : 0);
+            }
+
+            // Apply accent if present
+            if (this.externalRhythmPattern.accents && this.externalRhythmPattern.accents[position]) {
+                velocityBoost = 15;
+            }
+        }
 
         // Should we play on this position?
         if (pattern[position] === 1) {
@@ -1217,7 +1384,7 @@ export class SonofireBassist extends BaseInstrumentalist {
 
             // Get velocity from pattern, modulated by accent control
             let baseVelocity = velocity[position];
-            let finalVelocity = Math.round(baseVelocity * (this.accentVelocity / 100));
+            let finalVelocity = Math.round(baseVelocity * (this.accentVelocity / 100)) + velocityBoost;
 
             // Apply velocity humanization
             const velocityHumanization = this.calculateVelocityHumanization(finalVelocity, position);
@@ -1429,43 +1596,46 @@ export class SonofireBassist extends BaseInstrumentalist {
      */
     render() {
         this.innerHTML = `
-            <div style="background: #2d2d2d; padding: 10px; margin: 5px 0; border-left: 3px solid #608b4e;">
-                <strong style="color: #608b4e;">🎸 Bassist</strong>
-                <span style="margin-left: 10px; color: #888;">
-                    Channel:
-                    <select id="channel-select" style="margin: 0 5px;">
-                        ${this.renderChannelOptions()}
-                    </select>
-                    | Motion Type:
-                    <select id="motion-type-select" style="margin: 0 5px;">
-                        ${this.renderMotionTypeOptions()}
-                    </select>
-                    | Rhythm:
-                    <select id="rhythm-pattern-select" style="margin: 0 5px;">
-                        ${this.renderRhythmPatternOptions()}
-                    </select>
-                    | Transpose ${this.getTargetLightHTML('transpose')}:
-                    <select id="transpose-select" style="margin: 0 5px;">
-                        ${this.renderTransposeOptions()}
-                    </select>
-                    | Density ${this.getTargetLightHTML('density')}:
-                    <input type="range" id="density-slider" min="0" max="100" value="${this.density * 100}" style="width: 100px; vertical-align: middle;">
-                    <span style="margin-left: 5px;">${Math.round(this.density * 100)}%</span>
-                </span>
-                <br>
-                <span style="margin-left: 10px; color: #888;">
-                    Note Gen ${this.getTargetLightHTML('noteGeneration', 'inline')}
-                    | Velocity ${this.getTargetLightHTML('velocity', 'inline')}
-                    | Humanization ${this.getTargetLightHTML('humanization')}:
-                    <input type="range" id="humanization-slider" min="0" max="100"
-                           value="${Math.round(this.humanizationIntensity * 100)}"
-                           style="width: 100px; vertical-align: middle;">
-                    <span id="humanization-value">${Math.round(this.humanizationIntensity * 100)}%</span>
-                    | <button id="humanization-toggle" style="padding: 2px 8px; margin: 0 5px;">${this.humanizationEnabled ? '🎭 Human' : '🤖 Robot'}</button>
-                    | Mute ${this.getTargetLightHTML('mute')}: <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
-                    | <button id="debug-btn" style="padding: 2px 8px; margin: 0 5px;">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
-                    | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
-                </span>
+            <div class="sf-component sf-component-bassist">
+                <div class="sf-controls">
+                    <strong class="sf-component-header-bassist">🎸 Bassist</strong>
+                    <span class="sf-text-secondary">
+                        Channel:
+                        <select id="channel-select" class="sf-select" style="margin: 0 5px;">
+                            ${this.renderChannelOptions()}
+                        </select>
+                        | Motion Type:
+                        <select id="motion-type-select" class="sf-select" style="margin: 0 5px;">
+                            ${this.renderMotionTypeOptions()}
+                        </select>
+                        | Rhythm:
+                        <select id="rhythm-pattern-select" class="sf-select" style="margin: 0 5px;">
+                            ${this.renderRhythmPatternOptions()}
+                        </select>
+                        | Transpose ${this.getTargetLightHTML('transpose')}:
+                        <select id="transpose-select" class="sf-select" style="margin: 0 5px;">
+                            ${this.renderTransposeOptions()}
+                        </select>
+                        | Density ${this.getTargetLightHTML('density')}:
+                        <input type="range" id="density-slider" min="0" max="100" value="${this.density * 100}" style="width: 100px; vertical-align: middle;">
+                        <span style="margin-left: 5px;">${Math.round(this.density * 100)}%</span>
+                    </span>
+                </div>
+                <div class="sf-controls">
+                    <span class="sf-text-secondary">
+                        Note Gen ${this.getTargetLightHTML('noteGeneration', 'inline')}
+                        | Velocity ${this.getTargetLightHTML('velocity', 'inline')}
+                        | Humanization ${this.getTargetLightHTML('humanization')}:
+                        <input type="range" id="humanization-slider" min="0" max="100"
+                               value="${Math.round(this.humanizationIntensity * 100)}"
+                               style="width: 100px; vertical-align: middle;">
+                        <span id="humanization-value">${Math.round(this.humanizationIntensity * 100)}%</span>
+                        | <button id="humanization-toggle" class="sf-button sf-button-bassist">${this.humanizationEnabled ? '🎭 Human' : '🤖 Robot'}</button>
+                        | Mute ${this.getTargetLightHTML('mute')}: <button id="mute-btn" class="sf-button sf-button-bassist">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
+                        | <button id="debug-btn" class="sf-button sf-button-secondary">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
+                        | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
+                    </span>
+                </div>
             </div>
         `;
 

@@ -1,13 +1,19 @@
 import { SonofireBase } from '../base/sonofire_base.js';
+import { WhippableParametersMixin } from '../../lib/mixins/whippable_parameters.js';
+import { PubSub } from '../../lib/pubsub.js';
 import { generateProgression, voiceChord, selectNextTonicByFunction, getChordQualityForDegreeInPool } from '../../lib/music_theory.js';
 import { harmonicContext } from '../../lib/harmonic_context.js';
+import { SongSection } from '../../lib/song_section.js';
+
+// Delay after section restore before accepting melody-driven harmonization (prevents regeneration)
+const SECTION_RESTORE_HARMONIZATION_IGNORE_MS = 50;
 
 /**
  * Composer Component
  * Generates and advances through chord progressions
  * Publishes current chord to PubSub for instrumentalists
  */
-export class SonofireComposer extends SonofireBase {
+export class SonofireComposer extends WhippableParametersMixin(SonofireBase) {
     constructor() {
         super();
 
@@ -34,9 +40,25 @@ export class SonofireComposer extends SonofireBase {
         // Section system
         this.sections = [];                          // Array of section definitions
         this.currentSectionIndex = -1;               // Current section (-1 = no section)
-        this.sectionMode = 'manual';                 // 'manual' | 'auto'
+        this.sectionMode = 'auto';                 // 'manual' | 'auto'
         this.arrangementOrder = [];                  // [0, 1, 0, 2, 1] - section sequence
         this.arrangementIndex = 0;                   // Position in arrangement
+
+        // Section restore tracking (prevents reactive chord regeneration during restore)
+        this.restoringSection = false;               // True during section restore
+        this.restoreMelodyReceived = false;          // Track if melody publish received after restore
+        this.restoreRhythmReceived = false;          // Track if rhythm publish received after restore
+
+        // Melody-driven composition (new system)
+        this.compositionStyle = 'jazz-swing';        // Comprehensive style (jazz-swing, blues-12bar, rock, funk, etc.)
+        this.melodyInput = null;                     // Melody phrase from melody planner (always used when available)
+
+        // Dot notation timing system
+        this.timeSignature = '4/4';                  // Current time signature
+        this.beatsPerBar = 4;                        // Beats per bar (from time signature)
+        this.currentBeatInChord = 0;                 // Current beat within current chord (0-based)
+        this.isEditingProgression = false;           // Whether user is editing progression text
+        this.ticksPerBeat = 0;                       // Calculated from PPQN (set in handleClockTick)
     }
 
     /**
@@ -72,6 +94,22 @@ export class SonofireComposer extends SonofireBase {
     setupSubscriptions() {
         super.setupSubscriptions();
 
+        // Track section restore lifecycle (don't track these - they control restore state)
+        PubSub.subscribe('section:loading:start', () => {
+            console.log('[Composer] Section restore starting - will ignore reactive events');
+            this.restoringSection = true;
+            this.restoreMelodyReceived = false;
+        }, this);
+
+        PubSub.subscribe('section:loading:complete', () => {
+            console.log('[Composer] Section restore complete - waiting for planner publishes');
+            // Ignore harmonization for a brief period to let things settle
+            setTimeout(() => {
+                this.restoringSection = false;
+                console.log('[Composer] Now accepting melody-driven harmonization');
+            }, SECTION_RESTORE_HARMONIZATION_IGNORE_MS);
+        }, this);
+
         // Subscribe to pool/tonic changes
         this.subscribe('context:pool', (data) => {
             this.handlePoolChange(data);
@@ -81,6 +119,40 @@ export class SonofireComposer extends SonofireBase {
         this.subscribe('clock:tick', (data) => {
             this.handleClockTick(data);
         });
+
+        // Subscribe to time signature changes
+        this.subscribe('context:timeSignature', (data) => {
+            this.timeSignature = data.timeSignature;
+            this.beatsPerBar = data.beatsPerBar;
+            this.updateProgressionDisplay();
+        }, this);
+
+        // Subscribe to melody planner output (always use for harmonization when available)
+        this.subscribe('melody:phrase', (data) => {
+            console.log('Composer: Melody phrase received from planner', data);
+
+            // Convert notes format to points format for harmonization
+            // melody:phrase has 'notes' with {step, pitch} format
+            // harmonizeMelody expects 'points' with {x, y} format
+            this.melodyInput = {
+                ...data,
+                points: data.notes.map(note => ({
+                    x: note.step,
+                    y: note.pitch
+                }))
+            };
+
+            // If we're restoring a section, this is restored data - don't regenerate chords
+            if (this.restoringSection) {
+                console.log('[Composer] Received restored melody - skipping harmonization');
+                this.restoreMelodyReceived = true;
+                // Keep restoringSection=true until timeout clears it (prevents subsequent melody publishes from harmonizing)
+                return;
+            }
+
+            // Automatically harmonize when melody is received
+            this.harmonizeMelody();
+        }, this);
 
         // Subscribe to context:progression for section-based progression changes
         this.subscribe('context:progression', (data) => {
@@ -199,6 +271,9 @@ export class SonofireComposer extends SonofireBase {
             }
         });
 
+        // Melody input is now automatic via PubSub subscription to 'melody:phrase'
+        // No manual contour parameter needed
+
         // Render target lights after component is fully rendered
         requestAnimationFrame(() => {
             this.renderTargetLights();
@@ -224,6 +299,9 @@ export class SonofireComposer extends SonofireBase {
 
         // Register whippable parameters (after render)
         this.registerWhippableParameters();
+
+        // Publish initial style to instrumentalists
+        this.publishStyle();
 
         // Only generate initial progression if we don't have sections
         // (sections will load their own progression)
@@ -264,6 +342,12 @@ export class SonofireComposer extends SonofireBase {
         this.poolKey = poolData.poolKey;
         this.tonicNote = poolData.tonicNote;
         this.tonicName = poolData.tonicName;
+
+        // Skip regeneration if we're restoring a section (progression will be restored from saved state)
+        if (this.restoringSection) {
+            console.log(`[Composer] Pool/Tonic updated to ${this.poolKey}/${this.tonicName} during restore - skipping regeneration`);
+            return;
+        }
 
         // Only regenerate progression if pool or tonic actually changed
         if (poolChanged || tonicChanged) {
@@ -379,7 +463,8 @@ export class SonofireComposer extends SonofireBase {
                 quality: quality,
                 degree: currentDegree,
                 poolKey: poolKey,
-                mode: modeName
+                mode: modeName,
+                durationInBeats: this.barsPerChord * this.beatsPerBar  // Default duration
             };
 
             progression.push(chord);
@@ -394,12 +479,29 @@ export class SonofireComposer extends SonofireBase {
     handleClockTick(clockData) {
         const { tick, ppqn } = clockData;
 
-        // Calculate ticks per chord change
-        const ticksPerBar = ppqn * 4; // Assuming 4/4 time
-        const ticksPerChord = ticksPerBar * this.barsPerChord;
+        // Calculate ticks per beat (quarter note = 1 beat in most time signatures)
+        this.ticksPerBeat = ppqn;
+
+        // Get current chord duration (default to barsPerChord * beatsPerBar if not specified)
+        const currentChord = this.progression[this.progressionIndex];
+        const chordDuration = currentChord?.durationInBeats || (this.barsPerChord * this.beatsPerBar);
+
+        // Calculate ticks per chord (based on actual duration in beats)
+        const ticksPerChord = this.ticksPerBeat * chordDuration;
+
+        // Track beat within chord
+        const ticksSinceChordStart = tick % ticksPerChord;
+        const newBeatInChord = Math.floor(ticksSinceChordStart / this.ticksPerBeat);
+
+        // Update beat tracking and UI if beat changed
+        if (newBeatInChord !== this.currentBeatInChord) {
+            this.currentBeatInChord = newBeatInChord;
+            this.updateProgressionDisplay();
+        }
 
         // Advance chord on chord boundaries
         if (tick % ticksPerChord === 0 && tick > 0) {
+            this.currentBeatInChord = 0;
             this.advanceChord();
         }
 
@@ -412,6 +514,7 @@ export class SonofireComposer extends SonofireBase {
      */
     generateNewProgression() {
         console.log(`Composer: generateNewProgression called`);
+        console.log(`  melodyInput: ${this.melodyInput ? 'PRESENT' : 'NONE'}`);
         console.log(`  useProbabilistic: ${this.useProbabilistic}`);
         console.log(`  poolKey: ${this.poolKey}`);
         console.log(`  tonicNote: ${this.tonicNote}`);
@@ -419,7 +522,14 @@ export class SonofireComposer extends SonofireBase {
         console.log(`  currentScale: ${this.currentScale}`);
         console.log(`  progressionStyle: ${this.progressionStyle}`);
 
-        // Use probabilistic system if pool/tonic is available
+        // Priority 1: Use melody-driven harmonization if melody is available
+        if (this.melodyInput && this.melodyInput.points && this.melodyInput.points.length > 0) {
+            console.log('  Using MELODY-DRIVEN harmonization');
+            this.harmonizeMelody();
+            return; // harmonizeMelody() handles everything
+        }
+
+        // Priority 2: Use probabilistic system if pool/tonic is available
         if (this.useProbabilistic && this.poolKey && this.tonicNote) {
             console.log('  Using PROBABILISTIC system');
             this.progression = this.generateProgressionProbabilistic(
@@ -429,16 +539,22 @@ export class SonofireComposer extends SonofireBase {
                 this.progressionLength
             );
         } else {
-            // Fall back to legacy template-based system
+            // Priority 3: Fall back to legacy template-based system
             console.log('  Using LEGACY system');
             this.progression = generateProgression(
                 this.currentKey,
                 this.currentScale,
                 this.progressionStyle
             );
+
+            // Add default durations to legacy chords
+            this.progression.forEach(chord => {
+                chord.durationInBeats = chord.durationInBeats || (this.barsPerChord * this.beatsPerBar);
+            });
         }
 
         this.progressionIndex = 0;
+        this.currentBeatInChord = 0;
 
         console.log('Composer: Generated progression:',
             this.progression.map(c => c.symbol).join(' → '));
@@ -517,7 +633,8 @@ export class SonofireComposer extends SonofireBase {
                 quality: quality,
                 degree: currentDegree,
                 poolKey: poolKey,
-                mode: modeName
+                mode: modeName,
+                durationInBeats: this.barsPerChord * this.beatsPerBar  // Default duration
             };
 
             progression.push(chord);
@@ -641,6 +758,11 @@ export class SonofireComposer extends SonofireBase {
      * Update just the progression display (more efficient than full re-render)
      */
     updateProgressionDisplay() {
+        // Don't re-render if user is editing the progression
+        if (this.isEditingProgression) {
+            return;
+        }
+
         // Update text display
         const displayEl = this.$('#progression-display');
         if (displayEl) {
@@ -781,6 +903,8 @@ export class SonofireComposer extends SonofireBase {
         chordTokens.forEach(token => {
             const parsed = this.parseChordSymbol(token, useFlats);
             if (parsed) {
+                // Add default duration
+                parsed.durationInBeats = this.barsPerChord * this.beatsPerBar;
                 progression.push(parsed);
             } else {
                 console.warn(`Composer: Could not parse chord "${token}"`);
@@ -926,64 +1050,23 @@ export class SonofireComposer extends SonofireBase {
 
     /**
      * Capture current state as a new section
-     * Captures context topic values and playhead positions
+     * Uses SongSection for comprehensive state capture
      * @param {string} name - Section name
      * @returns {Promise<object>} Created section
      */
     async captureCurrentStateAsSection(name) {
-        const section = {
-            id: `section-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            name: name,
+        // Use SongSection to capture all state
+        const songSection = new SongSection(name);
+        await songSection.capture();
 
-            // Capture context topics
-            contextTopics: {
-                'context:progression': {
-                    progression: [...this.progression],
-                    progressionIndex: this.progressionIndex,  // Current chord position
-                    progressionLength: this.progressionLength,
-                    style: this.progressionStyle,
-                    barsPerChord: this.barsPerChord,
-                    voicingType: this.voicingType
-                },
-                'context:mood': { mood: this.getLastValue('context:mood')?.mood || 'relaxed' },
-                'context:density': { density: this.getLastValue('context:density')?.density || 0.5 },
-                'context:pool': {
-                    poolKey: this.poolKey || '0',
-                    tonicNote: this.tonicNote || 60,
-                    tonicName: this.tonicName || 'C',
-                    notes: this.getLastValue('context:pool')?.notes || []
-                },
-                'context:timeSignature': {
-                    timeSignature: this.getLastValue('context:timeSignature')?.timeSignature || '4/4',
-                    sixteenthsPerBar: this.getLastValue('context:timeSignature')?.sixteenthsPerBar || 16
-                },
-                'context:tempo': {
-                    bpm: this.getLastValue('clock:tempo')?.bpm || 120
-                },
-                'context:mute': {
-                    mutes: this.captureCurrentMutes()
-                },
-                'context:bassist': this.captureInstrumentalistSettings('sonofire-bassist'),
-                'context:drummer': this.captureInstrumentalistSettings('sonofire-drummer'),
-                'context:soloist': this.captureInstrumentalistSettings('sonofire-soloist'),
-                'context:keyboardist': this.captureInstrumentalistSettings('sonofire-keyboardist')
-            },
-
-            // Capture playhead states (not whippable - manual save/restore)
-            playheadStates: this.capturePlayheadStates(),
-
-            // Capture Y-zoom states from visualizers
-            yZoomStates: this.captureYZoomStates(),
-
-            // Capture whip bindings (await async operation)
-            whipBindings: await this.captureWhipBindings()
-        };
+        // Store the SongSection's JSON representation
+        const section = songSection.toJSON();
 
         this.sections.push(section);
         this.saveSections();
         this.render();
 
-        console.log(`Composer: Captured section "${name}":`, section);
+        console.log(`Composer: Captured section "${name}" using SongSection:`, section);
 
         return section;
     }
@@ -995,60 +1078,23 @@ export class SonofireComposer extends SonofireBase {
      * @returns {Promise<void>}
      */
     async overwriteSection(index, name) {
-        const section = {
-            id: this.sections[index].id,  // Keep existing ID
-            name: name,
+        // Use SongSection to capture all state
+        const songSection = new SongSection(name);
 
-            // Capture current context topics
-            contextTopics: {
-                'context:progression': {
-                    progression: [...this.progression],
-                    progressionIndex: this.progressionIndex,
-                    progressionLength: this.progressionLength,
-                    style: this.progressionStyle,
-                    barsPerChord: this.barsPerChord,
-                    voicingType: this.voicingType
-                },
-                'context:mood': { mood: this.getLastValue('context:mood')?.mood || 'relaxed' },
-                'context:density': { density: this.getLastValue('context:density')?.density || 0.5 },
-                'context:pool': {
-                    poolKey: this.poolKey || '0',
-                    tonicNote: this.tonicNote || 60,
-                    tonicName: this.tonicName || 'C',
-                    notes: this.getLastValue('context:pool')?.notes || []
-                },
-                'context:timeSignature': {
-                    timeSignature: this.getLastValue('context:timeSignature')?.timeSignature || '4/4',
-                    sixteenthsPerBar: this.getLastValue('context:timeSignature')?.sixteenthsPerBar || 16
-                },
-                'context:tempo': {
-                    bpm: this.getLastValue('clock:tempo')?.bpm || 120
-                },
-                'context:mute': {
-                    mutes: this.captureCurrentMutes()
-                },
-                'context:bassist': this.captureInstrumentalistSettings('sonofire-bassist'),
-                'context:drummer': this.captureInstrumentalistSettings('sonofire-drummer'),
-                'context:soloist': this.captureInstrumentalistSettings('sonofire-soloist'),
-                'context:keyboardist': this.captureInstrumentalistSettings('sonofire-keyboardist')
-            },
+        // Keep the existing ID
+        songSection.id = this.sections[index].id;
 
-            // Capture playhead states
-            playheadStates: this.capturePlayheadStates(),
+        await songSection.capture();
 
-            // Capture Y-zoom states from visualizers
-            yZoomStates: this.captureYZoomStates(),
-
-            // Capture whip bindings (await async operation)
-            whipBindings: await this.captureWhipBindings()
-        };
+        // Store the SongSection's JSON representation
+        const section = songSection.toJSON();
 
         // Replace the section at this index
         this.sections[index] = section;
         this.saveSections();
         this.render();
 
-        console.log(`Composer: Overwrote section "${name}" at index ${index}:`, section);
+        console.log(`Composer: Overwrote section "${name}" at index ${index} using SongSection:`, section);
     }
 
     /**
@@ -1203,64 +1249,28 @@ export class SonofireComposer extends SonofireBase {
      * Load a section by publishing its context topics
      * @param {number} sectionIndex - Section index to load
      */
-    loadSection(sectionIndex) {
+    async loadSection(sectionIndex) {
         if (sectionIndex < 0 || sectionIndex >= this.sections.length) return;
 
-        const section = this.sections[sectionIndex];
+        const sectionData = this.sections[sectionIndex];
         this.currentSectionIndex = sectionIndex;
 
-        console.log(`Composer: Loading section "${section.name}"`, section);
+        console.log(`Composer: Loading section "${sectionData.name}" using SongSection`);
 
-        // Directly restore progression state (don't rely on subscription handler)
-        const progressionData = section.contextTopics['context:progression'];
-        if (progressionData) {
-            this.progression = progressionData.progression;
-            this.progressionStyle = progressionData.style;
-            this.barsPerChord = progressionData.barsPerChord;
-            this.voicingType = progressionData.voicingType;
-            this.progressionLength = progressionData.progressionLength;
-            // ALWAYS start at first chord when loading a section
-            this.progressionIndex = 0;
-        }
-
-        // Directly restore pool/tonic state (don't rely on subscription handler)
-        const poolData = section.contextTopics['context:pool'];
-        if (poolData) {
-            this.poolKey = poolData.poolKey;
-            this.tonicNote = poolData.tonicNote;
-            this.tonicName = poolData.tonicName;
-        }
-
-        // Publish all context topics for this section (for other components)
-        for (const [topic, data] of Object.entries(section.contextTopics)) {
-            this.publish(topic, data);
-        }
-
-        // Publish current chord (now that progression is loaded)
-        this.publishCurrentChord();
-
-        // Restore playhead positions (manual restore - not whippable)
-        this.restorePlayheadStates(section.playheadStates);
-
-        // Restore Y-zoom states from visualizers
-        if (section.yZoomStates) {
-            this.restoreYZoomStates(section.yZoomStates);
-        }
-
-        // Optionally restore whip bindings
-        if (section.whipBindings && section.whipBindings.length > 0) {
-            this.restoreWhipBindings(section.whipBindings);
-        }
+        // Create SongSection from stored JSON and restore
+        // Note: SongSection.restore() broadcasts section:loading:start/complete
+        // which pauses/resumes all component subscriptions to prevent signal storms
+        const songSection = SongSection.fromJSON(sectionData);
+        await songSection.restore();
 
         // Publish section change event
         this.publish('context:section', {
-            sectionId: section.id,
-            sectionName: section.name,
+            sectionId: sectionData.id,
+            sectionName: sectionData.name,
             sectionIndex: sectionIndex
         });
 
-        // Update UI to show loaded section and progression
-        this.render();
+        console.log(`Composer: Section "${sectionData.name}" loaded successfully`);
     }
 
     /**
@@ -1497,7 +1507,7 @@ export class SonofireComposer extends SonofireBase {
         if (state) {
             this.sections = state.sections || [];
             this.currentSectionIndex = state.currentSectionIndex ?? -1;
-            this.sectionMode = state.sectionMode || 'manual';
+            this.sectionMode = state.sectionMode || 'auto';
             this.arrangementOrder = state.arrangementOrder || [];
 
             console.log(`Composer: Restored ${this.sections.length} section(s)`);
@@ -1507,14 +1517,17 @@ export class SonofireComposer extends SonofireBase {
                 this.render();
             }
 
-            // If there was a current section, load it to restore the musical state
-            if (this.currentSectionIndex >= 0 && this.currentSectionIndex < this.sections.length) {
-                console.log(`Composer: Auto-loading section ${this.currentSectionIndex} at startup`);
-                // Use setTimeout to ensure this happens after component is fully initialized
-                setTimeout(() => {
-                    this.loadSection(this.currentSectionIndex);
-                }, 0);
-            }
+            // NOTE: Auto-loading sections on startup disabled to prevent race conditions.
+            // When Composer initializes, other components (visualizers, planners, layer manager)
+            // may not be ready yet, causing partial state restoration and NaN errors.
+            // Users should manually load sections when ready.
+            //
+            // if (this.currentSectionIndex >= 0 && this.currentSectionIndex < this.sections.length) {
+            //     console.log(`Composer: Auto-loading section ${this.currentSectionIndex} at startup`);
+            //     setTimeout(() => {
+            //         this.loadSection(this.currentSectionIndex);
+            //     }, 0);
+            // }
         }
     }
 
@@ -1546,7 +1559,7 @@ export class SonofireComposer extends SonofireBase {
 
         const keyWidth = 30;
         const keyHeight = 60;
-        const svgWidth = keyWidth * 24;
+        const svgWidth = keyWidth * 7;
         const svgHeight = 100;
 
         let svg = `<svg width="${svgWidth}" height="${svgHeight}" style="background: #1e1e1e;">`;
@@ -1697,32 +1710,39 @@ export class SonofireComposer extends SonofireBase {
         const sectionName = currentSection?.name || 'No section';
 
         return `
-            <div style="margin-bottom: 15px; padding: 10px; background: #1e1e1e; border-radius: 4px;">
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                    <strong style="color: #dcdcaa;">Song Sections</strong>
-
-                    <!-- Mode selector -->
-                    <select id="section-mode-select" style="padding: 4px; background: #3c3c3c; color: #d4d4d4; border: 1px solid #555;">
-                        <option value="manual" ${this.sectionMode === 'manual' ? 'selected' : ''}>Manual</option>
-                        <option value="auto" ${this.sectionMode === 'auto' ? 'selected' : ''}>Auto</option>
-                    </select>
-
-                    <!-- Navigation -->
-                    <button id="prev-section-btn" style="padding: 4px 8px; background: #0e639c; color: white; border: none; cursor: pointer;">◀ Prev</button>
-                    <span style="color: #4ec9b0; font-weight: bold;">${sectionName}</span>
-                    <button id="next-section-btn" style="padding: 4px 8px; background: #0e639c; color: white; border: none; cursor: pointer;">Next ▶</button>
-
+            <div style="width:100%;">
+                <div style='display:flex; flex-direction:row; justify-content:space-between'>
+                    <strong style="color: #dcdcaa;">Sections</strong>
                     <!-- Capture current state -->
                     <button id="capture-section-btn" style="padding: 4px 8px; background: #608b4e; color: white; border: none; cursor: pointer;">📸 Capture</button>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px; justify-content:space-between; background-color:#2e2e2e; padding:2px; border-radius:4px;">
+
+                    <!-- Mode selector -->
+                    <!--select id="section-mode-select" style="padding: 4px; background: #3c3c3c; color: #d4d4d4; border: 1px solid #555;">
+                        <option value="manual" ${this.sectionMode === 'manual' ? 'selected' : ''}>Manual</option>
+                        <option value="auto" ${this.sectionMode === 'auto' ? 'selected' : ''}>Auto</option>
+                    </select-->
+
+                    <!-- Navigation -->
+                    <div style='flex: 2 1 0%; text-align:right;'>
+                        <button id="prev-section-btn" style="padding: 4px 8px; background: #0e639c; color: white; border: none; cursor: pointer; align-self:flex-end;">◀</button>
+                    </div>
+                    <div style='flex: 4 1 0%; text-align:center; background-color: #1e1e1e; padding:4px 8px; border-radius:3px;'>
+                        <span style="color: #4ec9b0; font-size:14px;">${sectionName}</span>
+                    </div>
+                    <div style='flex: 2 1 0%;'>
+                        <button id="next-section-btn" style="padding: 4px 8px; background: #0e639c; color: white; border: none; cursor: pointer;">▶</button>
+                    </div>
 
                     <!-- Section index whippable target -->
-                    <span style="margin-left: auto;">Section Index ${this.getTargetLightHTML('sectionIndex')}</span>
+                    <!--span style="margin-left: auto;">Section Index ${this.getTargetLightHTML('sectionIndex')}</span-->
                 </div>
 
                 <!-- Progress bar (for auto mode) - shows chord progression completion -->
                 ${this.sectionMode === 'auto' && currentSection && this.progression.length > 0 ? `
                     <div style="background: #3c3c3c; height: 4px; border-radius: 2px; overflow: hidden;">
-                        <div id="section-progress-bar" style="background: #4ec9b0; height: 100%; width: ${((this.progressionIndex + 1) / this.progression.length) * 100}%;"></div>
+                        <div id="section-progress-bar" style="background: #4ec9b0; height: 100%; width: ${((this.progressionIndex + 1) / this.progression.length) * 50}%;"></div>
                     </div>
                     <div id="section-progress-text" style="color: #888; font-size: 11px; text-align: center; margin-top: 2px;">
                         Chord ${this.progressionIndex + 1}/${this.progression.length}
@@ -1730,6 +1750,295 @@ export class SonofireComposer extends SonofireBase {
                 ` : ''}
             </div>
         `;
+    }
+
+    /**
+     * Set melody input from contour binding
+     * @param {Object} contourData - Contour data with points array
+     */
+    /**
+     * Analyze melody characteristics
+     * @param {Array} melodyNotes - Array of {x, y} points representing melody
+     * @returns {Object} Analysis results
+     */
+    analyzeMelody(melodyNotes) {
+        if (!melodyNotes || melodyNotes.length === 0) {
+            return null;
+        }
+
+        // Extract pitches (y values are MIDI notes)
+        const pitches = melodyNotes.map(n => Math.round(n.y));
+
+        // Find range
+        const lowest = Math.min(...pitches);
+        const highest = Math.max(...pitches);
+
+        // Get pitch class set (unique pitch classes used)
+        const pitchClasses = [...new Set(pitches.map(p => p % 12))];
+
+        // Calculate rhythmic density (notes per unit time)
+        const xRange = melodyNotes[melodyNotes.length - 1].x - melodyNotes[0].x;
+        const rhythmicDensity = melodyNotes.length / xRange;
+
+        // Find emphasized notes (simplification: use every 4th note as "strong beat")
+        const emphasizedNotes = melodyNotes.filter((_, i) => i % 4 === 0).map(n => Math.round(n.y));
+
+        return {
+            range: { lowest, highest },
+            pitchClasses,
+            rhythmicDensity,
+            emphasizedNotes,
+            length: melodyNotes.length
+        };
+    }
+
+    /**
+     * Harmonize melody based on composition style
+     */
+    harmonizeMelody() {
+        if (!this.melodyInput || !this.melodyInput.points) {
+            console.warn('Composer: No melody input to harmonize');
+            return;
+        }
+
+        const analysis = this.analyzeMelody(this.melodyInput.points);
+        if (!analysis) {
+            return;
+        }
+
+        console.log('Composer: Melody analysis:', analysis);
+
+        // Determine number of chords based on style
+        let chordsPerPhrase;
+        switch (this.compositionStyle) {
+            case 'funk':
+            case 'reggae':
+                chordsPerPhrase = Math.max(1, Math.floor(analysis.length / 16)); // Slow harmonic rhythm
+                break;
+            case 'jazz-swing':
+            case 'jazz-bebop':
+            case 'latin-bossa':
+                chordsPerPhrase = Math.max(2, Math.floor(analysis.length / 4)); // Faster harmonic rhythm
+                break;
+            default:
+                chordsPerPhrase = Math.max(2, Math.floor(analysis.length / 8));
+        }
+
+        // Divide melody into segments
+        const segmentSize = Math.floor(analysis.length / chordsPerPhrase);
+        const segments = [];
+        for (let i = 0; i < chordsPerPhrase; i++) {
+            const start = i * segmentSize;
+            const end = (i === chordsPerPhrase - 1) ? analysis.length : (i + 1) * segmentSize;
+            segments.push(this.melodyInput.points.slice(start, end));
+        }
+
+        // Generate progression by analyzing each segment
+        const newProgression = [];
+        segments.forEach((segment, index) => {
+            const chord = this.selectChordForSegment(
+                segment,
+                newProgression[index - 1],
+                index === segments.length - 1
+            );
+            newProgression.push(chord);
+        });
+
+        this.progression = newProgression;
+        this.progressionIndex = 0;
+
+        console.log('Composer: Generated melody-driven progression:', newProgression);
+
+        this.publishCurrentChord();
+        this.render();
+    }
+
+    /**
+     * Select best chord for a melody segment
+     * @param {Array} segment - Melody notes in this segment
+     * @param {Object} previousChord - Previous chord object
+     * @param {boolean} isLastSegment - Whether this is the last segment
+     * @returns {Object} Chord object
+     */
+    selectChordForSegment(segment, previousChord, isLastSegment) {
+        // Extract emphasized notes (first note and any peaks)
+        const pitches = segment.map(n => Math.round(n.y));
+        const strongBeatNotes = [pitches[0]]; // First note is emphasized
+
+        // Get current pool notes
+        const pool = harmonicContext.getNotePool(this.poolKey || '0');
+        const poolPitchClasses = [...new Set(pool.map(n => n % 12))];
+
+        // Score chords built from pool notes
+        const candidates = [];
+        poolPitchClasses.forEach(rootPC => {
+            const chordQuality = this.getChordQualityForStyle(rootPC);
+            const chord = {
+                root: rootPC,
+                quality: chordQuality,
+                voicing: this.generateVoicing(rootPC, chordQuality),
+                symbol: this.generateChordSymbol(rootPC, chordQuality)
+            };
+
+            const score = this.scoreChord(chord, strongBeatNotes, previousChord);
+            candidates.push({ chord, score });
+        });
+
+        // Sort by score
+        candidates.sort((a, b) => b.score - a.score);
+
+        // Return best (with occasional variation)
+        const randomFactor = Math.random();
+        if (randomFactor < 0.1 && candidates.length > 1) {
+            return candidates[1].chord; // 10% chance of 2nd choice
+        }
+
+        return candidates[0].chord;
+    }
+
+    /**
+     * Generate chord symbol from root pitch class and quality
+     * @param {number} rootPC - Root pitch class (0-11)
+     * @param {string} quality - Chord quality
+     * @returns {string} Chord symbol (e.g., "Cm7", "G7", "Fmaj7")
+     */
+    generateChordSymbol(rootPC, quality) {
+        const noteNames = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+        const rootName = noteNames[rootPC];
+
+        const qualitySuffixes = {
+            'major': '',
+            'minor': 'm',
+            'dominant7': '7',
+            'minor7': 'm7',
+            'major7': 'maj7',
+            'diminished': 'dim',
+            'augmented': 'aug',
+            'sus4': 'sus4',
+            'sus2': 'sus2'
+        };
+
+        const suffix = qualitySuffixes[quality] || '';
+        return `${rootName}${suffix}`;
+    }
+
+    /**
+     * Get appropriate chord quality for style
+     * @param {number} rootPC - Root pitch class
+     * @returns {string} Chord quality
+     */
+    getChordQualityForStyle(rootPC) {
+        switch (this.compositionStyle) {
+            case 'jazz-swing':
+            case 'jazz-bebop':
+            case 'jazz-modal':
+                return 'minor7'; // Default to 7th chords for jazz
+            case 'blues-12bar':
+            case 'blues-minor':
+                return 'dominant7'; // Blues uses dominant 7ths
+            case 'rock':
+            case 'pop':
+            case 'country':
+                return 'major'; // Simple triads for rock/pop
+            default:
+                return 'major';
+        }
+    }
+
+    /**
+     * Generate voicing for a chord
+     * @param {number} rootPC - Root pitch class (0-11)
+     * @param {string} quality - Chord quality
+     * @returns {Array} Array of MIDI note numbers
+     */
+    generateVoicing(rootPC, quality) {
+        const root = 60 + rootPC; // Middle C + pitch class
+
+        switch (quality) {
+            case 'major':
+                return [root, root + 4, root + 7];
+            case 'minor':
+                return [root, root + 3, root + 7];
+            case 'dominant7':
+                return [root, root + 4, root + 7, root + 10];
+            case 'minor7':
+                return [root, root + 3, root + 7, root + 10];
+            case 'major7':
+                return [root, root + 4, root + 7, root + 11];
+            default:
+                return [root, root + 4, root + 7];
+        }
+    }
+
+    /**
+     * Score a chord based on melody fit and style appropriateness
+     * @param {Object} chord - Chord to score
+     * @param {Array} melodyNotes - Melody notes (MIDI numbers)
+     * @param {Object} previousChord - Previous chord
+     * @returns {number} Score (higher is better)
+     */
+    scoreChord(chord, melodyNotes, previousChord) {
+        let score = 0;
+
+        // 1. Melody fit - melody notes should be chord tones
+        const chordTones = chord.voicing.map(n => n % 12);
+        melodyNotes.forEach(note => {
+            if (chordTones.includes(note % 12)) {
+                score += 10; // Strong bonus for melody note being chord tone
+            }
+        });
+
+        // 2. Voice leading from previous chord
+        if (previousChord) {
+            const movement = Math.abs((chord.root - previousChord.root + 12) % 12);
+            if (movement === 5 || movement === 7) {
+                score += 8; // Circle of 5ths movement
+            } else if (movement === 2) {
+                score += 5; // Step motion
+            }
+        }
+
+        // 3. Style-specific progressions
+        if (this.compositionStyle.startsWith('jazz')) {
+            // Favor ii-V-I motion
+            if (previousChord && (chord.root - previousChord.root + 12) % 12 === 5) {
+                score += 7; // Down a 5th (up a 4th)
+            }
+        }
+
+        return score;
+    }
+
+    /**
+     * Publish composition style to instrumentalists
+     */
+    publishStyle() {
+        this.publish('context:style', {
+            style: this.compositionStyle,
+            timestamp: Date.now()
+        });
+
+        console.log(`Composer: Published style "${this.compositionStyle}"`);
+    }
+
+    /**
+     * Set composition style
+     * @param {string} style - New composition style
+     */
+    setCompositionStyle(style) {
+        if (style !== this.compositionStyle) {
+            this.compositionStyle = style;
+
+            // Publish style change to instrumentalists
+            this.publishStyle();
+
+            // If we have melody input, re-harmonize with new style
+            if (this.melodyInput && this.melodyInput.points) {
+                this.harmonizeMelody();
+            }
+
+            console.log(`Composer: Style changed to "${style}"`);
+        }
     }
 
     /**
@@ -1763,10 +2072,13 @@ export class SonofireComposer extends SonofireBase {
         }
 
         return `
-            <div style="margin-bottom: 15px; max-height: 200px; overflow-y: auto;">
+            <div style="overflow-y: auto; width:100%;">
                 ${this.sections.map((section, index) => {
-                    const progression = section.contextTopics['context:progression'];
-                    const barsPerChordLabel = this.getBarsPerChordLabel(progression.barsPerChord);
+                    // Access composer data from new SongSection format
+                    const composerData = section.state?.composer;
+                    const numChords = composerData?.progression?.length || 0;
+                    const barsPerChord = composerData?.barsPerChord || 4;
+                    const barsPerChordLabel = this.getBarsPerChordLabel(barsPerChord);
                     return `
                     <div class="section-item" data-section-index="${index}" draggable="true" style="
                         padding: 8px;
@@ -1783,7 +2095,7 @@ export class SonofireComposer extends SonofireBase {
                             <div>
                                 <strong style="color: #dcdcaa;">${section.name}</strong>
                                 <span style="color: #888; font-size: 11px; margin-left: 10px;">
-                                    ${progression.progression.length} chords @ ${barsPerChordLabel}
+                                    ${numChords} chords @ ${barsPerChordLabel}
                                 </span>
                             </div>
                         </div>
@@ -1804,50 +2116,104 @@ export class SonofireComposer extends SonofireBase {
         const friendlyKeyName = this.getFriendlyKeyName();
 
         this.innerHTML = `
-            <div style="background: #2d2d2d; padding: 15px; margin: 10px 0; border-left: 3px solid #569cd6;">
-                <h3 style="margin: 0 0 10px 0; color: #569cd6;">🎹 Composer</h3>
+            <div class='sf-component' style="background: #2d2d2d; padding: 15px; margin: 10px 0; border-left: 3px solid #569cd6;">
+                <h3 style="margin: 0 0 10px 0; color: #569cd6;">Composer</h3>
 
-                <!-- Section Controls -->
-                ${this.renderSectionControls()}
-
-                <!-- Section List -->
-                ${this.renderSectionList()}
-
-                <!-- Piano Keyboard Grid -->
-                <div style="margin-bottom: 15px; padding: 10px; background: #1e1e1e; border-radius: 4px; overflow-x: auto;">
-                    <div style="margin-bottom: 5px; font-size: 0.9em; color: #888;">
-                        <span style="display: inline-block; width: 12px; height: 12px; background: #00cc88; border-radius: 2px; vertical-align: middle;"></span> Current Pool
-                        <span style="margin-left: 10px; display: inline-block; width: 12px; height: 12px; background: #ffcc00; border-radius: 50%; vertical-align: middle;"></span> Current Chord Root
-                        <span style="margin-left: 15px; color: #569cd6; font-weight: bold;">${friendlyKeyName}</span>
-                        <span style="margin-left: 5px; color: #666; font-size: 0.85em;">(${this.poolKey || '0'}/${this.tonicName || 'C'})</span>
+                <!-- Text Progression Display -->
+                <div style='margin-bottom:10px;'>
+                    <div style='display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 5px;'>
+                        <label style='font-size:10px;'>Current Progression:</label>
+                        <button id="edit-progression-btn"
+                                style="padding: 4px 10px;
+                                       background: ${this.isEditingProgression ? '#4ec9b0' : '#0e639c'};
+                                       color: white;
+                                       border: none;
+                                       cursor: pointer;
+                                       font-size: 11px;
+                                       border-radius: 3px;">
+                            ${this.isEditingProgression ? '✓ Save' : '✏️ Edit'}
+                        </button>
                     </div>
-                    <div id="keyboard-grid">
-                        ${this.renderKeyboardGrid()}
+                    <div id="progression-display" style="font-family: monospace; padding: 10px; background: #1e1e1e; border-radius: 4px; font-size: 14px;">
+                        ${this.renderProgressionDisplay()}
                     </div>
                 </div>
 
-                <!-- Progression Settings -->
+                <div>
+                    <label style='margin-bottom: 5px; display: block; font-size:10px;'>Composition Style:</label>
+                    <select id="composition-style-select" class="sf-select" style="width: 180px;">
+                        ${this.renderCompositionStyleOptions()}
+                    </select>
+                </div>
+
+
+                <div style='display: flex; flex-wrap: nowrap; flex-direction: row'>
+                    <div class='sf-controls' style='margin-right:5px; flex:3 3 0%; flex-direction:column; padding:10px;'>
+                        <div>
+                            <span style="display: inline-block; background: #4ec9b0; border-radius: 2px; vertical-align: middle; color:#1e1e1e; padding:1px 6px">Current Pool</span>
+                            <span style="margin-left: 10px; display: inline-block; background: #ffcc00; border-radius: 10px; vertical-align: middle; padding: 1px 8px; color: #1e1e1e;">Chord Root</span>
+                        </div>
+
+                        <div id="keyboard-grid">
+                            ${this.renderKeyboardGrid()}
+                        </div>
+
+
+                        <div>
+                            <span style="color: #569cd6; font-weight: bold;">${friendlyKeyName}</span>
+                            <span style="margin-left: 5px; color: #666;">(${this.poolKey || '0'}/${this.tonicName || 'C'})</span>
+                        </div>
+                    </div>
+                    <div class='sf-controls' style='flex:4 4 0%;'>
+                        <!-- Section Controls -->
+                        ${this.renderSectionControls()}
+
+                        <!-- Section List -->
+                        ${this.renderSectionList()}
+                    </div>
+                </div>
+
+
+                <!-- Piano Keyboard Grid -->
+                <!--div style="margin-bottom: 15px; padding: 10px; background: #1e1e1e; border-radius: 4px; overflow-x: auto;">
+                    <div style="margin-bottom: 5px; font-size: 0.9em; color: #888;">
+                    </div>
+                </div-->
+
+                <!-- Composition Style (New System) -->
+                <!--div style="margin-bottom: 15px; padding: 10px; background: #1e1e1e; border-left: 2px solid #569cd6;">
+                    <div>
+                        <strong>Melody Input:</strong>
+                        ${this.getContourTargetHTML('melodyInput')}
+                        <span style="margin-left: 10px; color: #888; font-size: 0.9em;">
+                            ${this.useMelodyHarmonization ? '✓ Melody-driven harmonization enabled' : 'No melody input'}
+                        </span>
+                    </div>
+                </div-->
+
+                <!-- Progression Settings (Legacy/Manual) >
                 <div style="margin-bottom: 10px;">
-                    <strong>Style ${this.getTargetLightHTML('progressionStyle')}:</strong>
+                    <strong>Progression Style ${this.getTargetLightHTML('progressionStyle')}:</strong>
                     <select id="style-select">
                         ${this.renderStyleOptions()}
                     </select>
                     <strong style="margin-left: 15px;">Length ${this.getTargetLightHTML('progressionLength')}:</strong>
                     <input type="number" id="progression-length-input" value="${this.progressionLength}" min="2" max="16" style="width: 50px;">
                     <button id="regenerate-btn" style="margin-left: 10px;">Regenerate</button>
-                </div>
+                    <span style="margin-left: 10px; color: #888; font-size: 0.85em;">(Legacy progression generation)</span>
+                </div-->
 
                 <!-- Manual Progression Entry -->
-                <div style="margin-bottom: 10px;">
+                <!--div style="margin-bottom: 10px;">
                     <strong>Manual Entry:</strong>
                     <input type="text" id="manual-progression-input"
                            placeholder="e.g., C#m7 F#m7 G#m7 A7"
                            style="width: 300px; padding: 4px; font-family: monospace;">
                     <button id="set-manual-progression-btn" style="margin-left: 5px;">Set Progression</button>
                     <span style="color: #888; font-size: 0.85em; margin-left: 10px;">Space-separated chord symbols</span>
-                </div>
+                </div-->
 
-                <div style="margin-bottom: 10px;">
+                <!--div style="margin-bottom: 10px;">
                     <strong>Bars per Chord ${this.getTargetLightHTML('barsPerChord')}:</strong>
                     <select id="bars-per-chord-select" style="padding: 4px;">
                         ${this.renderBarsPerChordOptions()}
@@ -1856,21 +2222,15 @@ export class SonofireComposer extends SonofireBase {
                     <select id="voicing-select">
                         ${this.renderVoicingOptions()}
                     </select>
-                </div>
+                </div-->
 
-                <!-- Text Progression Display -->
-                <div style="margin-bottom: 10px;">
-                    <strong>Progression:</strong>
-                    <div id="progression-display" style="font-family: monospace; padding: 10px; background: #1e1e1e; border-radius: 4px; font-size: 14px;">
-                        ${this.renderProgressionDisplay()}
-                    </div>
-                </div>
+
 
                 <!-- Navigation -->
-                <div>
+                <!--div>
                     <button id="prev-chord-btn">← Previous</button>
                     <button id="next-chord-btn">Next →</button>
-                </div>
+                </div-->
             </div>
         `;
 
@@ -2023,16 +2383,55 @@ export class SonofireComposer extends SonofireBase {
             });
         });
 
-        // Progression controls
-        this.$('#style-select').onchange = (e) => {
-            this.setProgressionStyle(e.target.value);
-            // No render() - setProgressionStyle() already updates dropdown and progression display
-        };
+        // Edit progression button
+        const editProgressionBtn = this.$('#edit-progression-btn');
+        if (editProgressionBtn) {
+            editProgressionBtn.onclick = () => {
+                this.toggleEditMode();
+            };
+        }
 
-        this.$('#regenerate-btn').onclick = () => {
-            this.generateNewProgression();
-            this.render();
-        };
+        // Progression editor keyboard handler
+        const progressionEditor = this.$('#progression-editor');
+        if (progressionEditor) {
+            progressionEditor.onkeydown = (e) => {
+                this.handleProgressionEditorKey(e);
+            };
+
+            // Also handle blur (when user clicks away)
+            progressionEditor.onblur = () => {
+                if (this.isEditingProgression) {
+                    // Save changes when focus is lost
+                    setTimeout(() => this.toggleEditMode(), 100);
+                }
+            };
+        }
+
+        // Composition style selector (new system)
+        const compositionStyleSelect = this.$('#composition-style-select');
+        if (compositionStyleSelect) {
+            compositionStyleSelect.onchange = (e) => {
+                this.setCompositionStyle(e.target.value);
+                this.render();
+            };
+        }
+
+        // Progression controls (legacy)
+        let styleSelect = this.$('#style-select');
+        if(styleSelect){
+            styleSelect.onchange = (e) => {
+                this.setProgressionStyle(e.target.value);
+                // No render() - setProgressionStyle() already updates dropdown and progression display
+            };
+        }
+
+        let regenerateButton = this.$('#regenerate-btn');
+        if(regenerateButton){
+            regenerateButton.onclick = () => {
+                this.generateNewProgression();
+                this.render();
+            };            
+        }
 
         // Manual progression entry
         const manualProgressionInput = this.$('#manual-progression-input');
@@ -2056,21 +2455,23 @@ export class SonofireComposer extends SonofireBase {
             };
         }
 
-        this.$('#progression-length-input').onchange = (e) => {
+        // TODO: tell claude to refactor this.
+        /*this.$('#bars-per-chord-select').onchange = (e) => {
+            this.barsPerChord = parseFloat(e.target.value);
+            console.log(`Composer: Bars per chord set to ${this.barsPerChord}`);
+        };*/
+
+        // do we need progression length anymore? with the melody planner this is very awkward...
+        /*this.$('#progression-length-input').onchange = (e) => {
             const newLength = parseInt(e.target.value);
             this.setProgressionLength(newLength);
         };
 
-        this.$('#bars-per-chord-select').onchange = (e) => {
-            this.barsPerChord = parseFloat(e.target.value);
-            console.log(`Composer: Bars per chord set to ${this.barsPerChord}`);
-        };
-
         this.$('#voicing-select').onchange = (e) => {
             this.setVoicingType(e.target.value);
-        };
+        };*/
 
-        this.$('#prev-chord-btn').onclick = () => {
+        /*this.$('#prev-chord-btn').onclick = () => {
             this.progressionIndex = (this.progressionIndex - 1 + this.progression.length) % this.progression.length;
             this.publishCurrentChord();
             this.updateProgressionDisplay(); // Update UI efficiently
@@ -2079,7 +2480,7 @@ export class SonofireComposer extends SonofireBase {
         this.$('#next-chord-btn').onclick = () => {
             this.advanceChord();
             // advanceChord already calls updateProgressionDisplay
-        };
+        };*/
     }
 
     // UI rendering helpers
@@ -2097,6 +2498,32 @@ export class SonofireComposer extends SonofireBase {
         ];
         return styles.map(([value, label]) =>
             `<option value="${value}" ${value === this.progressionStyle ? 'selected' : ''}>${label}</option>`
+        ).join('');
+    }
+
+    /**
+     * Render comprehensive composition style options
+     */
+    renderCompositionStyleOptions() {
+        const styles = [
+            ['jazz-swing', 'Jazz - Swing'],
+            ['jazz-bebop', 'Jazz - Bebop'],
+            ['jazz-modal', 'Jazz - Modal'],
+            ['jazz-ballad', 'Jazz - Ballad'],
+            ['blues-12bar', 'Blues - 12-Bar'],
+            ['blues-minor', 'Blues - Minor'],
+            ['rock', 'Rock'],
+            ['funk', 'Funk'],
+            ['latin-bossa', 'Latin - Bossa Nova'],
+            ['latin-salsa', 'Latin - Salsa'],
+            ['latin-samba', 'Latin - Samba'],
+            ['rb-soul', 'R&B/Soul'],
+            ['pop', 'Pop/Contemporary'],
+            ['country', 'Country'],
+            ['reggae', 'Reggae']
+        ];
+        return styles.map(([value, label]) =>
+            `<option value="${value}" ${value === this.compositionStyle ? 'selected' : ''}>${label}</option>`
         ).join('');
     }
 
@@ -2132,14 +2559,296 @@ export class SonofireComposer extends SonofireBase {
 
     renderProgressionDisplay() {
         if (this.progression.length === 0) {
-            return '<em>No progression generated</em>';
+            return '<em style="color: #888;">No progression generated</em>';
         }
 
-        return this.progression.map((chord, index) => {
+        if (this.isEditingProgression) {
+            // Show editable textarea
+            return this.renderEditableProgression();
+        }
+
+        // Build the display with chord symbols and dots aligned vertically
+        return this.renderProgressionGrid();
+    }
+
+    /**
+     * Render progression as a grid with chords and dots aligned vertically
+     */
+    renderProgressionGrid() {
+        // Calculate column data for each chord
+        const columns = this.progression.map((chord, index) => {
+            const duration = chord.durationInBeats || (this.barsPerChord * this.beatsPerBar);
+            const numBars = Math.ceil(duration / this.beatsPerBar);
             const isCurrent = index === this.progressionIndex;
-            const style = isCurrent ? 'color: #4ec9b0; font-weight: bold;' : 'color: #d4d4d4;';
-            return `<span style="${style}">${chord.symbol}</span>`;
-        }).join(' → ');
+
+            // Calculate column width (max of chord symbol length + arrow, or beats per bar)
+            const chordWidth = Math.max(chord.symbol.length + 3, this.beatsPerBar);
+
+            return {
+                chord,
+                index,
+                duration,
+                numBars,
+                isCurrent,
+                chordWidth
+            };
+        });
+
+        // Find max number of bars across all chords
+        const maxBars = Math.max(...columns.map(c => c.numBars));
+
+        // Build HTML using a table structure for alignment
+        let html = '<table style="font-family: monospace; border-spacing: 0; line-height: 1.8;">';
+
+        // First row: Chord symbols
+        html += '<tr>';
+        columns.forEach((col, idx) => {
+            const style = col.isCurrent ?
+                'color: #4ec9b0; font-weight: bold; font-size: 15px; padding-right: 8px;' :
+                'color: #d4d4d4; font-size: 14px; padding-right: 8px;';
+
+            const arrow = idx < columns.length - 1 ? '<span style="color: #666;"> → </span>' : '';
+            html += `<td style="${style}">${col.chord.symbol}${arrow}</td>`;
+        });
+        html += '</tr>';
+
+        // Subsequent rows: Dots for each bar
+        for (let barNum = 0; barNum < maxBars; barNum++) {
+            html += '<tr>';
+
+            columns.forEach((col) => {
+                const startBeat = barNum * this.beatsPerBar;
+                const endBeat = Math.min((barNum + 1) * this.beatsPerBar, col.duration);
+
+                let cellContent = '';
+
+                if (startBeat < col.duration) {
+                    // This chord has beats in this bar
+                    for (let beat = startBeat; beat < endBeat; beat++) {
+                        const isCurrent = (col.index === this.progressionIndex && beat === this.currentBeatInChord);
+                        const beatSymbol = isCurrent ? '*' : '•';
+                        const color = isCurrent ? '#4ec9b0' : '#888';
+
+                        cellContent += `<span style="color: ${color};">${beatSymbol}</span>`;
+                    }
+                } else {
+                    // No beats in this bar for this chord (padding)
+                    cellContent = '&nbsp;';
+                }
+
+                html += `<td style="padding-right: 8px; letter-spacing: 1px;">${cellContent}</td>`;
+            });
+
+            html += '</tr>';
+        }
+
+        html += '</table>';
+        return html;
+    }
+
+    /**
+     * Render editable progression in dot notation format
+     */
+    renderEditableProgression() {
+        const text = this.serializeProgressionToDotNotation();
+        return `<textarea id="progression-editor"
+                style="width: 100%;
+                       min-height: 120px;
+                       max-height: 200px;
+                       font-family: monospace;
+                       background: #1e1e1e;
+                       color: #d4d4d4;
+                       border: 1px solid #4ec9b0;
+                       padding: 10px;
+                       font-size: 14px;
+                       line-height: 1.6;
+                       resize: vertical;">${text}</textarea>`;
+    }
+
+    /**
+     * Serialize current progression to dot notation text format
+     */
+    serializeProgressionToDotNotation() {
+        if (this.progression.length === 0) return '';
+
+        // Calculate column data
+        const columns = this.progression.map(chord => {
+            const duration = chord.durationInBeats || (this.barsPerChord * this.beatsPerBar);
+            const numBars = Math.ceil(duration / this.beatsPerBar);
+            return { chord, duration, numBars };
+        });
+
+        const maxBars = Math.max(...columns.map(c => c.numBars));
+
+        let text = '';
+
+        // First line: chord symbols with arrows
+        text += columns.map((col, idx) => {
+            const symbol = col.chord.symbol;
+            const arrow = idx < columns.length - 1 ? ' -> ' : '';
+            return symbol + arrow;
+        }).join('') + '\n';
+
+        // Subsequent lines: dots aligned under each chord
+        for (let barNum = 0; barNum < maxBars; barNum++) {
+            const lineParts = [];
+
+            columns.forEach((col, colIdx) => {
+                const startBeat = barNum * this.beatsPerBar;
+                const endBeat = Math.min((barNum + 1) * this.beatsPerBar, col.duration);
+
+                let dotsForChord = '';
+
+                if (startBeat < col.duration) {
+                    // Add dots for this bar
+                    for (let beat = startBeat; beat < endBeat; beat++) {
+                        dotsForChord += '•';
+                    }
+                }
+
+                // Pad to match chord symbol width (for alignment)
+                const chordSymbol = col.chord.symbol;
+                const arrow = colIdx < columns.length - 1 ? ' -> ' : '';
+                const targetWidth = chordSymbol.length + arrow.length;
+
+                while (dotsForChord.length < targetWidth) {
+                    dotsForChord += ' ';
+                }
+
+                lineParts.push(dotsForChord);
+            });
+
+            const line = lineParts.join('').trimEnd();
+            if (line.trim()) {
+                text += line + '\n';
+            }
+        }
+
+        return text;
+    }
+
+    /**
+     * Parse dot notation text into progression with durations
+     * Format:
+     *   Cm7 -> Gm7 -> Fm -> Gm
+     *   ••••   ••     ••    ••
+     *   ••••
+     */
+    parseDotNotationProgression(text) {
+        const lines = text.trim().split('\n').filter(line => line);
+        if (lines.length === 0) return;
+
+        // First line: chord symbols
+        const chordLine = lines[0];
+        const chordTokens = chordLine.split('->').map(s => s.trim()).filter(s => s);
+
+        if (chordTokens.length === 0) {
+            console.warn('No chords found in input');
+            return;
+        }
+
+        // Parse chord symbols
+        const useFlats = this.shouldUseFlats();
+        const chords = chordTokens.map(token => this.parseChordSymbol(token, useFlats)).filter(c => c);
+
+        if (chords.length === 0) {
+            console.warn('No valid chords parsed');
+            return;
+        }
+
+        // Find column positions of each chord in the first line
+        const chordPositions = [];
+        let searchPos = 0;
+        chordTokens.forEach(token => {
+            const pos = chordLine.indexOf(token, searchPos);
+            chordPositions.push(pos);
+            searchPos = pos + token.length;
+        });
+
+        // Remaining lines: dots aligned under chords
+        const dotLines = lines.slice(1);
+        const beatCounts = new Array(chords.length).fill(0);
+
+        // Count dots for each chord by column position
+        dotLines.forEach(line => {
+            chordPositions.forEach((startPos, chordIdx) => {
+                const endPos = chordIdx < chordPositions.length - 1 ?
+                    chordPositions[chordIdx + 1] : line.length;
+
+                // Count dots in this chord's column range
+                for (let i = startPos; i < endPos && i < line.length; i++) {
+                    const char = line[i];
+                    if (char === '.' || char === '•' || char === '*') {
+                        beatCounts[chordIdx]++;
+                    }
+                }
+            });
+        });
+
+        // Assign durations to chords
+        chords.forEach((chord, index) => {
+            chord.durationInBeats = beatCounts[index] || this.beatsPerBar;
+        });
+
+        // Update progression
+        this.progression = chords;
+        this.progressionLength = chords.length;
+        this.progressionIndex = 0;
+        this.currentBeatInChord = 0;
+
+        console.log('Parsed dot notation progression:', this.progression);
+
+        this.publishCurrentChord();
+
+        // Skip display update during section restore (full render() will happen after)
+        if (!this.restoringSection) {
+            this.updateProgressionDisplay();
+        }
+    }
+
+    /**
+     * Toggle edit mode for progression
+     */
+    toggleEditMode() {
+        if (this.isEditingProgression) {
+            // Exiting edit mode - turn off flag FIRST, then parse
+            this.isEditingProgression = false;
+            const editor = this.$('#progression-editor');
+            if (editor) {
+                this.parseDotNotationProgression(editor.value);
+            }
+            // parseDotNotationProgression calls updateProgressionDisplay which will now work
+        } else {
+            // Entering edit mode - turn on flag, then render
+            this.isEditingProgression = true;
+            // Manually update just the progression display to show textarea
+            const displayEl = this.$('#progression-display');
+            if (displayEl) {
+                displayEl.innerHTML = this.renderProgressionDisplay();
+            }
+            // Focus the textarea
+            setTimeout(() => {
+                const editor = this.$('#progression-editor');
+                if (editor) {
+                    editor.focus();
+                    editor.select();
+                }
+            }, 50);
+        }
+    }
+
+    /**
+     * Handle key press in progression editor
+     */
+    handleProgressionEditorKey(event) {
+        if (event.key === 'Escape') {
+            // Cancel editing without saving
+            this.isEditingProgression = false;
+            this.updateProgressionDisplay();
+        } else if (event.key === 'Enter' && event.ctrlKey) {
+            // Save on Ctrl+Enter
+            this.toggleEditMode();
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-import 'https://unpkg.com/d3@7.9.0';
+import '../lib/d3.min.js';
 import { MIDI_NOTES_FLAT, MIDI_NOTES_SHARP, SCALES, MIDI_CHANNELS, SCALE_TONES } from "../lib/midi_data.js";
 
 export class SonofirePitchGenerator extends HTMLElement {

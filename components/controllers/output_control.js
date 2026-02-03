@@ -192,12 +192,7 @@ export class SonofireOutputControl extends SonofireBase {
     updateStatus() {
         const statusEl = this.$('#output-status');
         if (!statusEl) return;
-
-        const midiStatus = this.midiEnabled ? 'ON' : 'OFF';
-        const clockStatus = this.midiClockEnabled ? 'ON' : 'OFF';
-        const webAudioStatus = this.webAudioEnabled ? 'ON' : 'OFF';
-
-        statusEl.textContent = `MIDI: ${midiStatus}, Clock: ${clockStatus}, WebAudio: ${webAudioStatus}`;
+        statusEl.innerHTML = this.getStatusText();
     }
 
     /**
@@ -205,45 +200,68 @@ export class SonofireOutputControl extends SonofireBase {
      */
     render() {
         this.innerHTML = `
-            <div style="background: #2d2d2d; padding: 15px; margin: 10px 0; border-left: 3px solid #4ec9b0;">
-                <h3 style="margin: 0 0 10px 0; color: #4ec9b0;">🎛️ Output Control</h3>
+            <div class='sf-component output-control' style="border-left: 3px solid #4ec9b0;">
+                <h3 style="margin: 0; color: #4ec9b0;">Output Control</h3>
+                <div style='display:flex'>
+                    <fieldset>
+                        <label>MIDI Output</label>
+                        <table>
+                            <tr>
+                                <th>
+                                    Output Device
+                                </th>
+                                <th>
+                                    Enabled
+                                </th>
+                                <th>
+                                    Send&nbsp;Clock
+                                </th>
+                                <th></th>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <select id="midi-device-select" class="sf-select">
+                                        ${this.renderMIDIDeviceOptions()}
+                                    </select>
+                                </td>
+                                <td>
+                                    <input type="checkbox" id="midi-toggle" ${this.midiEnabled ? 'checked' : ''}>
+                                </td>
+                                <td>
+                                    <input type="checkbox" id="midi-clock-toggle" ${this.midiClockEnabled ? 'checked' : ''}>
+                                </td>
+                                <td>
+                                    <button id='panic-btn'>Notes&nbspOff</button>
+                                </td>
+                            </tr>
+                        </table>
+                    </fieldset>
 
-                <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 10px;">
-                    <!-- MIDI Output Toggle -->
-                    <label>
-                        <input type="checkbox" id="midi-toggle" ${this.midiEnabled ? 'checked' : ''}>
-                        MIDI Output
-                    </label>
+                    <fieldset>
+                        <label>WebAudio Output</label>
+                        <table>
+                            <tr>
+                                <th>Enabled
+                                </th>
+                                <th></th>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <input type="checkbox" id="webaudio-toggle" ${this.webAudioEnabled ? 'checked' : ''}>
+                                </td>
+                                <td>
+                                    <button>Notes&nbspOff</button>
+                                </td>
+                            </tr>
+                        </table>
+                    </fieldset>
 
-                    <!-- MIDI Device Selector -->
-                    <label>
-                        MIDI Device:
-                        <select id="midi-device-select" style="margin-left: 5px; padding: 4px; background: #3c3c3c; color: #d4d4d4; border: 1px solid #555;">
-                            ${this.renderMIDIDeviceOptions()}
-                        </select>
-                    </label>
-
-                    <!-- MIDI Clock Toggle -->
-                    <label title="Send MIDI clock messages (0xF8) to external devices">
-                        <input type="checkbox" id="midi-clock-toggle" ${this.midiClockEnabled ? 'checked' : ''}>
-                        MIDI Clock
-                    </label>
-
-                    <!-- WebAudio Toggle -->
-                    <label>
-                        <input type="checkbox" id="webaudio-toggle" ${this.webAudioEnabled ? 'checked' : ''}>
-                        WebAudio Output
-                    </label>
-
-                    <!-- Panic Button -->
-                    <button class="panic" id="panic-btn" style="background: #d32f2f; font-weight: bold; padding: 8px 16px; margin-left: 10px;">
-                        🚨 PANIC
-                    </button>
-                </div>
-
-                <!-- Status Display -->
-                <div id="output-status" style="padding: 8px; background: #252526; font-family: monospace; font-size: 12px; border-radius: 4px;">
-                    ${this.getStatusText()}
+                    <fieldset style='display:none;'>
+                        <label>Status</label>
+                        <div id="output-status" style='display:flex;'>
+                            ${this.getStatusText()}
+                        </div>
+                    </fieldset>
                 </div>
             </div>
         `;
@@ -273,7 +291,9 @@ export class SonofireOutputControl extends SonofireBase {
         const midiStatus = this.midiEnabled ? 'ON' : 'OFF';
         const clockStatus = this.midiClockEnabled ? 'ON' : 'OFF';
         const webAudioStatus = this.webAudioEnabled ? 'ON' : 'OFF';
-        return `MIDI: ${midiStatus}, Clock: ${clockStatus}, WebAudio: ${webAudioStatus}`;
+        return `<table>
+                    <tr><th>MIDI</th><th>Clock</th><th>WebAudio</th></tr>
+                    <tr><td>${midiStatus}</td><td>${clockStatus}</td><td>${webAudioStatus}</td>`;
     }
 
     /**

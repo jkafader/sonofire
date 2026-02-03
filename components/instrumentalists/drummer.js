@@ -69,6 +69,14 @@ export class SonofireDrummer extends BaseInstrumentalist {
         // Define style layers for density gradients
         this.styleLayers = this.defineStyleLayers(this.timeSignature);
         this.fills = this.defineFills();
+
+        // Style-based groove selection (NEW)
+        this.currentStyle = null;
+        this.styleGrooveMap = null;  // Maps composition styles to drum styles
+
+        // Rhythm planner integration (NEW)
+        this.externalRhythmPattern = null;  // Pattern from rhythm planner
+        this.useExternalRhythm = false;      // Whether to use external rhythm
     }
 
     /**
@@ -630,6 +638,27 @@ export class SonofireDrummer extends BaseInstrumentalist {
             this.renderThrottled();
         });
 
+        // NEW: Subscribe to composition style from Composer
+        this.subscribe('context:style', (data) => {
+            if (data.style !== this.currentStyle) {
+                this.currentStyle = data.style;
+                this.interpretStyle(data.style);
+                console.log(`Drummer: Interpreting style "${data.style}"`);
+            }
+        }, this);
+
+        // NEW: Subscribe to rhythm pattern from planner
+        this.subscribe('rhythm:pattern', (data) => {
+            this.externalRhythmPattern = data.pattern;
+            this.useExternalRhythm = true;
+            console.log('Drummer: Received external rhythm pattern:', data.pattern);
+            console.log('Drummer: Pattern layers:', data.pattern.layers.map(l => ({
+                density: l.density,
+                patternLength: l.pattern.length,
+                hasHits: l.pattern.some(v => v === 1)
+            })));
+        }, this);
+
         // Subscribe to drummer settings from sections
         this.subscribe('context:drummer', (data) => {
             if (data.drumStyle && data.drumStyle !== this.drumStyle) {
@@ -784,6 +813,89 @@ export class SonofireDrummer extends BaseInstrumentalist {
     }
 
     /**
+     * Interpret composition style and select appropriate drum style
+     * @param {string} style - Style identifier (e.g., 'jazz-swing', 'funk', etc.)
+     */
+    interpretStyle(style) {
+        // Map composition styles to drum styles
+        let drumStyle = 'rock';  // Default
+        let swingAmount = 0.0;   // Swing feel
+
+        switch (style) {
+            case 'jazz-swing':
+            case 'jazz-bebop':
+                drumStyle = 'jazz';
+                swingAmount = 0.67;  // Strong swing (triplet feel)
+                break;
+
+            case 'jazz-modal':
+            case 'jazz-ballad':
+                drumStyle = 'jazz';
+                swingAmount = 0.4;  // Light swing
+                break;
+
+            case 'funk':
+                drumStyle = 'funk';
+                swingAmount = 0.0;  // Straight 16ths
+                break;
+
+            case 'reggae':
+                drumStyle = 'reggae';
+                swingAmount = 0.0;
+                break;
+
+            case 'latin-bossa':
+                drumStyle = 'bossa';
+                swingAmount = 0.0;
+                break;
+
+            case 'latin-salsa':
+            case 'latin-samba':
+                drumStyle = 'samba';
+                swingAmount = 0.0;
+                break;
+
+            case 'blues-12bar':
+            case 'blues-minor':
+                drumStyle = 'rock';  // Use rock with shuffle
+                swingAmount = 0.5;  // Shuffle feel
+                break;
+
+            case 'rock':
+                drumStyle = 'rock';
+                swingAmount = 0.0;
+                break;
+
+            case 'pop':
+                drumStyle = 'disco';  // Use disco for pop (clean, consistent)
+                swingAmount = 0.0;
+                break;
+
+            case 'rnb-soul':
+                drumStyle = 'funk';  // Funk grooves work well for R&B
+                swingAmount = 0.2;  // Slight swing
+                break;
+
+            case 'country':
+                drumStyle = 'rock';
+                swingAmount = 0.4;  // Country shuffle
+                break;
+
+            default:
+                drumStyle = 'rock';
+                swingAmount = 0.0;
+                break;
+        }
+
+        // Apply drum style and swing
+        this.drumStyle = drumStyle;
+        this.swingAmount = swingAmount;
+
+        // Regenerate groove
+        this.selectGroove();
+    }
+
+    /**
      * Select groove based on density and style
      * Generates pattern dynamically using density gradient
      */
@@ -893,7 +1005,56 @@ export class SonofireDrummer extends BaseInstrumentalist {
             return;
         }
 
-        const baseVelocity = this.calculateBaseVelocity();
+        let baseVelocity = this.calculateBaseVelocity();
+
+        // NEW: Integrate external rhythm pattern if available
+        let shouldPlay = true;
+        let velocityBoost = 0;
+
+        if (this.useExternalRhythm && this.externalRhythmPattern && this.externalRhythmPattern.layers) {
+            // Select density layer based on current density
+            const layerIndex = Math.min(
+                Math.floor(this.density * this.externalRhythmPattern.layers.length),
+                this.externalRhythmPattern.layers.length - 1
+            );
+            const selectedLayer = this.externalRhythmPattern.layers[layerIndex];
+
+            if (step === 0) {
+                console.log(`Drummer: Step 0 - Using external rhythm. Density: ${this.density}, LayerIndex: ${layerIndex}, SelectedLayer:`, selectedLayer);
+            }
+
+            // Check if this step should play according to external rhythm
+            // IMPORTANT: Only use external pattern if it actually has content
+            if (selectedLayer && selectedLayer.pattern && selectedLayer.pattern.length > 0) {
+                // Use modulo to wrap if pattern is shorter than step count
+                const patternStep = step % selectedLayer.pattern.length;
+                // Handle both boolean and numeric patterns
+                shouldPlay = !!selectedLayer.pattern[patternStep];
+
+                if (step === 0) {
+                    console.log(`Drummer: Step 0 - Pattern[${patternStep}] = ${selectedLayer.pattern[patternStep]}, shouldPlay: ${shouldPlay}`);
+                }
+            } else {
+                // Pattern is empty - disable external rhythm and use internal groove
+                console.log('Drummer: External rhythm pattern is empty, using internal groove');
+                this.useExternalRhythm = false;
+            }
+
+            // Apply accent if present
+            if (this.externalRhythmPattern.accents && this.externalRhythmPattern.accents.length > 0) {
+                const accentStep = step % this.externalRhythmPattern.accents.length;
+                if (this.externalRhythmPattern.accents[accentStep]) {
+                    velocityBoost = 15;  // Boost velocity for accented notes
+                }
+            }
+        }
+
+        if (!shouldPlay) {
+            if (step === 0) {
+                console.log('Drummer: Step 0 - shouldPlay is false, returning without playing');
+            }
+            return;  // External rhythm says don't play on this step
+        }
 
         //console.log(`Drummer playGroove: step ${step}, pattern:`, this.currentPattern);
 
@@ -901,7 +1062,7 @@ export class SonofireDrummer extends BaseInstrumentalist {
         for (const [voiceName, pattern] of Object.entries(this.currentPattern)) {
             if (pattern[step] === 1) {
                 //console.log(`Drummer: Hit ${voiceName} at step ${step}`);
-                this.playDrumHit(voiceName, step, baseVelocity);
+                this.playDrumHit(voiceName, step, baseVelocity + velocityBoost);
             }
         }
     }
@@ -1089,41 +1250,44 @@ export class SonofireDrummer extends BaseInstrumentalist {
      */
     render() {
         this.innerHTML = `
-            <div style="background: #2d2d2d; padding: 10px; margin: 5px 0; border-left: 3px solid #d7ba7d;">
-                <strong style="color: #d7ba7d;">🥁 Drummer</strong>
-                <span style="margin-left: 10px; color: #888;">
-                    Channel:
-                    <select id="channel-select" style="margin: 0 5px;">
-                        ${this.renderChannelOptions()}
-                    </select>
-                    | Style:
-                    <select id="style-select" style="margin: 0 5px;">
-                        ${this.renderStyleOptions()}
-                    </select>
-                    | Mood: ${this.mood}
-                </span>
-                <br>
-                <span style="margin-left: 10px; color: #888;">
-                    Density ${this.getTargetLightHTML('density')}:
-                    <input type="range" id="density-slider" min="0" max="100"
-                           value="${Math.round(this.density * 100)}"
-                           style="width: 100px; vertical-align: middle;">
-                    <span id="density-value">${this.density.toFixed(2)}</span>
-                    | Humanization ${this.getTargetLightHTML('humanization')}:
-                    <input type="range" id="humanization-slider" min="0" max="100"
-                           value="${Math.round(this.humanizationIntensity * 100)}"
-                           style="width: 100px; vertical-align: middle;">
-                    <span id="humanization-value">${Math.round(this.humanizationIntensity * 100)}%</span>
-                    | <button id="humanization-toggle" style="padding: 2px 8px; margin: 0 5px;">${this.humanizationEnabled ? '🎭 Human' : '🤖 Robot'}</button>
-                    | Swing ${this.getTargetLightHTML('swing')}:
-                    <input type="range" id="swing-slider" min="0" max="100"
-                           value="${Math.round(this.swingAmount * 100)}"
-                           style="width: 100px; vertical-align: middle;">
-                    <span id="swing-value">${Math.round(this.swingAmount * 100)}%</span>
-                    | Mute ${this.getTargetLightHTML('mute')}: <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
-                    | <button id="debug-btn" style="padding: 2px 8px; margin: 0 5px;">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
-                    | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
-                </span>
+            <div class="sf-component sf-component-drummer">
+                <div class="sf-controls">
+                    <strong class="sf-component-header-drummer">🥁 Drummer</strong>
+                    <span class="sf-text-secondary">
+                        Channel:
+                        <select id="channel-select" class="sf-select" style="margin: 0 5px;">
+                            ${this.renderChannelOptions()}
+                        </select>
+                        | Style:
+                        <select id="style-select" class="sf-select" style="margin: 0 5px;">
+                            ${this.renderStyleOptions()}
+                        </select>
+                        | Mood: ${this.mood}
+                    </span>
+                </div>
+                <div class="sf-controls">
+                    <span class="sf-text-secondary">
+                        Density ${this.getTargetLightHTML('density')}:
+                        <input type="range" id="density-slider" min="0" max="100"
+                               value="${Math.round(this.density * 100)}"
+                               style="width: 100px; vertical-align: middle;">
+                        <span id="density-value">${this.density.toFixed(2)}</span>
+                        | Humanization ${this.getTargetLightHTML('humanization')}:
+                        <input type="range" id="humanization-slider" min="0" max="100"
+                               value="${Math.round(this.humanizationIntensity * 100)}"
+                               style="width: 100px; vertical-align: middle;">
+                        <span id="humanization-value">${Math.round(this.humanizationIntensity * 100)}%</span>
+                        | <button id="humanization-toggle" class="sf-button sf-button-drummer">${this.humanizationEnabled ? '🎭 Human' : '🤖 Robot'}</button>
+                        | Swing ${this.getTargetLightHTML('swing')}:
+                        <input type="range" id="swing-slider" min="0" max="100"
+                               value="${Math.round(this.swingAmount * 100)}"
+                               style="width: 100px; vertical-align: middle;">
+                        <span id="swing-value">${Math.round(this.swingAmount * 100)}%</span>
+                        | Mute ${this.getTargetLightHTML('mute')}: <button id="mute-btn" class="sf-button sf-button-drummer">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
+                        | <button id="debug-btn" class="sf-button sf-button-secondary">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
+                        | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
+                    </span>
+                </div>
             </div>
         `;
 

@@ -23,6 +23,7 @@ export class SonofireConductor extends SonofireBase {
         // Pool/tonic notation (new system)
         this.poolKey = null;     // e.g., "3♯", "0", "2♭"
         this.tonicName = null;   // e.g., "A", "C♯"
+        this.scaleType = 'diatonic';  // 'diatonic' | 'pentatonic' | 'blues' | 'octatonic' | 'chromatic'
     }
 
     /**
@@ -35,6 +36,7 @@ export class SonofireConductor extends SonofireBase {
             'data-initial-scale',
             'data-pool',
             'data-tonic',
+            'data-scale-type',
             'data-tempo',
             'data-mode',
             'data-time-signature'
@@ -50,6 +52,7 @@ export class SonofireConductor extends SonofireBase {
         // New pool/tonic notation (preferred)
         this.poolKey = this.getAttribute('data-pool');
         this.tonicName = this.getAttribute('data-tonic');
+        this.scaleType = this.getAttribute('data-scale-type') || 'diatonic';
 
         // Legacy key/scale notation (backward compatibility)
         this.initialKey = this.getAttribute('data-initial-key') || 'C';
@@ -351,15 +354,34 @@ export class SonofireConductor extends SonofireBase {
     }
 
     /**
+     * Get description for scale type
+     * @returns {string} Description of the scale type
+     */
+    getScaleTypeDescription(scaleType) {
+        const descriptions = {
+            'diatonic': 'Standard 7-tone scale (Do-Re-Mi-Fa-Sol-La-Ti)',
+            'pentatonic': '5-tone scale (Do-Re-Mi-Sol-La)',
+            'blues': 'Pentatonic + tritone (adds ♯4/♭5)',
+            'octatonic': 'Alternating whole-half steps (W-H-W-H-W-H-W-H)',
+            'chromatic': 'All 12 semitones'
+        };
+        return descriptions[scaleType] || '';
+    }
+
+    /**
      * Set pool and tonic center (new notation)
      * @param {string} poolKey - Pool key (e.g., "3♯", "0", "2♭")
      * @param {string} tonicName - Tonic note name (e.g., "A", "C♯")
+     * @param {string} scaleType - Scale type (optional, defaults to current)
      */
-    setPoolAndTonic(poolKey, tonicName) {
-        console.log(`Conductor: setPoolAndTonic() called with poolKey="${poolKey}", tonicName="${tonicName}"`);
+    setPoolAndTonic(poolKey, tonicName, scaleType = null) {
+        console.log(`Conductor: setPoolAndTonic() called with poolKey="${poolKey}", tonicName="${tonicName}", scaleType="${scaleType || this.scaleType}"`);
 
         this.poolKey = poolKey;
         this.tonicName = tonicName;
+        if (scaleType) {
+            this.scaleType = scaleType;
+        }
 
         // Convert tonic name to MIDI note
         const tonicNote = harmonicContext.noteNameToMIDI(tonicName, 4);
@@ -368,9 +390,9 @@ export class SonofireConductor extends SonofireBase {
         console.log(`Conductor: Calling harmonicContext.setPoolAndTonic()`);
 
         // Update harmonic context service
-        harmonicContext.setPoolAndTonic(poolKey, tonicNote, tonicName);
+        harmonicContext.setPoolAndTonic(poolKey, tonicNote, tonicName, this.scaleType);
 
-        console.log(`Conductor: Pool/Tonic set to ${poolKey}/${tonicName} (MIDI ${tonicNote})`);
+        console.log(`Conductor: Pool/Tonic/ScaleType set to ${poolKey}/${tonicName}/${this.scaleType} (MIDI ${tonicNote})`);
 
         // Update dropdowns directly (no full re-render)
         this.updatePoolTonicDropdowns();
@@ -551,30 +573,91 @@ export class SonofireConductor extends SonofireBase {
         const friendlyKeyName = this.getFriendlyKeyName();
 
         this.innerHTML = `
-            <div style="background: #2d2d2d; padding: 15px; margin: 10px 0; border-left: 3px solid #4ec9b0;">
-                <h3 style="margin: 0 0 10px 0; color: #4ec9b0;">🎼 Conductor</h3>
+            <div class="sf-component sf-component-conductor">
+                <h3 class="sf-component-header sf-component-header-conductor">Conductor</h3>
 
-                <!-- Pool/Tonic Notation (Primary System) -->
-                <div style="margin-bottom: 10px; padding: 10px; background: #1e1e1e; border-radius: 4px;">
-                    <strong style="color: #569cd6;">Key:</strong>
-                    <strong>Note Pool ${this.getTargetLightHTML('notePool')}:</strong>
-                    <select id="pool-select" style="margin-left: 10px;">
-                        ${this.renderPoolOptions()}
-                    </select>
-                    <span style="margin: 0 5px;">/</span>
-                    <select id="tonic-select">
-                        ${this.renderTonicOptions()}
-                    </select>
-                    <span style="margin-left: 10px; color: #4ec9b0; font-weight: bold;">
-                        ${friendlyKeyName}
-                    </span>
-                    <span style="margin-left: 5px; color: #666; font-size: 0.85em;">
-                        (${displayPoolKey}/${displayTonicName})
-                    </span>
+                <div class="sf-controls">
+                    <table>
+                        <tr>
+                            <th>
+                                Transport
+                            </th>
+                            <th>
+                                Time
+                            </th>
+                            <th>
+                                Pool
+                            </th>
+                            <th>
+                                Tonic
+                            </th>
+                            <th>
+                                Scale
+                            </th>
+                        </tr>
+                        <tr>
+                            <td>
+                                <button id="play-btn" class="sf-button sf-button-success" style="margin: 0 5px;">▶</button>
+                                <button id="stop-btn" class="sf-button sf-button-danger" style="margin: 0 5px;">⏹</button>
+                                <button id="rewind-btn" class="sf-button sf-button-secondary" style="margin: 0 5px;">⏮</button>
+                            </td>
+                            <td>
+                                <label class="sf-label">
+                                    <input type="number" id="tempo-input" value="${this.tempo}" style="width:30px" min="40" max="240" class="sf-input">
+                                    <span>BPM</span><strong>${this.getTargetLightHTML('tempo')}</strong>
+                                </label>&nbsp;
+                                <label class="sf-label">
+                                    <select id="time-signature-select" class="sf-select">
+                                        ${this.renderTimeSignatureOptions()}
+                                    </select>
+                                    <strong>${this.getTargetLightHTML('timeSignature')}</strong>
+                                </label>
+                            </td>
+                            <td>
+                                <!--${this.getTargetLightHTML('notePool')}-->
+                                <select id="pool-select" class="sf-select" style="width:50px;">
+                                    ${this.renderPoolOptions()}
+                                </select>
+                            </td>
+                            <td>
+                                <select id="tonic-select" class="sf-select" style="width:50px;">
+                                    ${this.renderTonicOptions()}
+                                </select>
+                            </td>
+                            <td>
+                                <select id="scale-type-select" class="sf-select">
+                                    <option value="diatonic" ${this.scaleType === 'diatonic' ? 'selected' : ''}>Diatonic</option>
+                                    <option value="pentatonic" ${this.scaleType === 'pentatonic' ? 'selected' : ''}>Pentatonic</option>
+                                    <option value="blues" ${this.scaleType === 'blues' ? 'selected' : ''}>Blues</option>
+                                    <option value="octatonic" ${this.scaleType === 'octatonic' ? 'selected' : ''}>Octatonic</option>
+                                    <option value="chromatic" ${this.scaleType === 'chromatic' ? 'selected' : ''}>Chromatic</option>
+                                </select>
+                            </td>
+                        </tr>
+                    </table>
+
                 </div>
 
+                <!-- Pool/Tonic Notation (Primary System) -->
+                <!--div class="sf-controls">
+                    <div style="margin-bottom: 8px;">
+                        <!--span style="margin-left: 10px; font-weight: bold;" class="sf-text-conductor">
+                            ${friendlyKeyName}
+                        </span>
+                        <span style="margin-left: 5px;" class="sf-text-secondary">
+                            (${displayPoolKey}/${displayTonicName})
+                        </span>
+                    </div>
+                    <div>
+                        <strong class="sf-text-conductor">Scale Type:</strong>
+                        <!--span style="margin-left: 10px;" class="sf-info-text">
+                            ${this.getScaleTypeDescription(this.scaleType)}
+                        </span>
+                    </div>
+                </div-->
+
                 <!-- Legacy Key/Scale (hidden by default, for backward compatibility) -->
-                <details style="margin-bottom: 10px; display: none;">
+                <!--details style="margin-bottom: 10px; display: none;">
                     <summary style="cursor: pointer; color: #888; font-size: 0.9em;">Legacy Key/Scale Notation</summary>
                     <div style="margin-top: 5px; padding: 5px;">
                         <strong>Key:</strong>
@@ -585,43 +668,32 @@ export class SonofireConductor extends SonofireBase {
                             ${this.renderScaleOptions()}
                         </select>
                     </div>
-                </details>
+                </details-->
 
-                <div style="margin-bottom: 10px;">
-                    <strong>Tempo ${this.getTargetLightHTML('tempo')}:</strong>
-                    <input type="number" id="tempo-input" value="${this.tempo}" min="40" max="240" style="width: 60px;">
-                    <span>BPM</span>
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>Time Signature ${this.getTargetLightHTML('timeSignature')}:</strong>
-                    <select id="time-signature-select">
-                        ${this.renderTimeSignatureOptions()}
-                    </select>
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>Transport:</strong>
-                    <button id="play-btn" style="background: #0e639c; color: white; border: none; padding: 8px 16px; margin: 0 5px; cursor: pointer; font-size: 14px;">▶ Play</button>
-                    <button id="stop-btn" style="background: #0e639c; color: white; border: none; padding: 8px 16px; margin: 0 5px; cursor: pointer; font-size: 14px;">⏹ Stop</button>
-                    <button id="rewind-btn" style="background: #0e639c; color: white; border: none; padding: 8px 16px; margin: 0 5px; cursor: pointer; font-size: 14px;">⏮ Rewind</button>
-                    <span style="margin-left: 10px; color: #888;">
-                        (Controls MIDI clock and visualizer playheads)
-                    </span>
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>Mood ${this.getTargetLightHTML('mood')}:</strong>
-                    <select id="mood-select">
-                        ${this.renderMoodOptions()}
-                    </select>
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>Density ${this.getTargetLightHTML('density')}:</strong>
-                    <input type="range" id="density-slider" min="0" max="100" value="${this.density * 100}" style="width: 200px;">
-                    <span id="density-value">${this.density.toFixed(2)}</span>
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>Mode:</strong>
-                    <label><input type="radio" name="mode" value="manual" ${this.mode === 'manual' ? 'checked' : ''}> Manual</label>
-                    <label><input type="radio" name="mode" value="auto" ${this.mode === 'auto' ? 'checked' : ''}> Auto</label>
+                <div class="sf-controls">
+                    <table>
+                        <tr>
+                            <th>
+                                Master Mood
+                            </th>
+                            <th>
+                                Master Density
+                            </th>
+                        </tr>
+                        <tr>
+                            <td>
+                                <strong>${this.getTargetLightHTML('mood')}</strong>
+                                <select id="mood-select" class="sf-select">
+                                    ${this.renderMoodOptions()}
+                                </select>
+                            </td>
+                            <td>
+                                <strong>${this.getTargetLightHTML('density')}</strong>
+                                <input type="range" id="density-slider" min="0" max="100" value="${this.density * 100}" style="width: 200px;">
+                                <span id="density-value" style="font-size:10px;">${this.density.toFixed(2)}</span>
+                            </td>
+                        </tr>
+                    </td>
                 </div>
             </div>
         `;
@@ -672,6 +744,15 @@ export class SonofireConductor extends SonofireBase {
             const poolKey = this.poolKey || '0';
             this.setPoolAndTonic(poolKey, tonicName);
             // No render() - setPoolAndTonic() already updates dropdowns
+        };
+
+        this.$('#scale-type-select').onchange = (e) => {
+            const scaleType = e.target.value;
+            const poolKey = this.poolKey || '0';
+            const tonicName = this.tonicName || 'C';
+            this.setPoolAndTonic(poolKey, tonicName, scaleType);
+            // Re-render to update description
+            this.render();
         };
 
         // Legacy key/scale selectors - convert to pool/tonic

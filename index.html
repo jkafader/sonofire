@@ -3,6 +3,7 @@
 <head>
     <title>Sonofire - Data Sonification</title>
     <meta charset="UTF-8">
+    <link rel="stylesheet" href="styles/components.css">
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -81,15 +82,7 @@
     <h1>Sonofire: Data Sonification System</h1>
 
     <!-- Output Control Component -->
-    <sonofire-output-control
-        data-midi-enabled="true"
-        data-midi-clock-enabled="false"
-        data-webaudio-enabled="false">
-    </sonofire-output-control>
-
-    <!-- Control Components (Using new Pool/Tonic notation) -->
-    <!-- pools are e.g. 3♯, 2♯, 5♭, 0 -->
-    <div class="controls-container">
+    <div class='controls-container' style='display:flex;'>
         <div class="control-wrapper conductor">
             <sonofire-conductor
                 data-pool="3♭"
@@ -98,26 +91,24 @@
                 data-mode="manual">
             </sonofire-conductor>
         </div>
-
-        <div class="control-wrapper composer">
-            <sonofire-composer
-                data-progression-style="blues"
-                data-bars-per-chord="2"
-                data-progression-length="8"
-                data-use-probabilistic="true">
-            </sonofire-composer>
+        <div class="control-wrapper output">
+            <sonofire-output-control
+                data-midi-enabled="true"
+                data-midi-clock-enabled="false"
+                data-webaudio-enabled="false">
+            </sonofire-output-control>
         </div>
     </div>
 
     <!-- Visualizers (now include built-in playhead management) -->
-    <!--h2 style="color: #4ec9b0; margin-top: 30px;">Beer Production - Raw Data</h2>
+    <h2 style="color: #4ec9b0; margin-top: 30px;">Beer Production - Raw Data</h2>
     <div class="visualization-container">
         <div class="plot-wrapper">
-            <sonofire-xy-plot id="main-xy-plot" data-url="beer_production.csv"></sonofire-xy-plot>
+            <sonofire-xy-plot id="main-xy-plot" style='height:100%' data-url="beer_production.csv"></sonofire-xy-plot>
         </div>
-    </div-->
+    </div>
 
-    <h2 style="color: #4ec9b0; margin-top: 30px;">Beer Production - 6-Month Moving Average</h2>
+    <!--h2 style="color: #4ec9b0; margin-top: 30px;">Beer Production - 6-Month Moving Average</h2>
     <div class="visualization-container">
         <div class="plot-wrapper">
             <sonofire-xy-plot id="moving-avg-6mo-plot" data-url="beer_production_6mo_avg.csv"></sonofire-xy-plot>
@@ -128,6 +119,43 @@
     <div class="visualization-container">
         <div class="plot-wrapper">
             <sonofire-xy-plot id="moving-avg-2yr-plot" data-url="beer_production_2yr_avg.csv"></sonofire-xy-plot>
+        </div>
+    </div-->
+
+    <div class='controls-container' style='display:flex;'>
+        <div class='control-wrapper'>
+            <!-- Rhythm Planner -->
+            <sonofire-rhythm-planner
+                id="rhythm-planner-1"
+                data-resolution="16"
+                data-time-signature="4/4"
+                data-bars="1">
+            </sonofire-rhythm-planner>
+        </div>
+
+        <div class='control-wrapper'>
+            <!-- Melody Planner -->
+            <sonofire-melody-planner
+                id="melody-planner-1"
+                data-pool-key="0"
+                data-tonic-note="60"
+                data-scale-type="diatonic"
+                data-phrase-length="16">
+            </sonofire-melody-planner>
+        </div>
+    </div>
+
+    <!-- Control Components (Using new Pool/Tonic notation) -->
+    <!-- pools are e.g. 3♯, 2♯, 5♭, 0 -->
+    <div class="controls-container">
+        <div class="control-wrapper composer">
+            <sonofire-composer
+                id="composer-1"
+                data-progression-style="blues"
+                data-bars-per-chord="2"
+                data-progression-length="8"
+                data-use-probabilistic="true">
+            </sonofire-composer>
         </div>
     </div>
 
@@ -182,11 +210,13 @@
         data-enabled="true">
     </sonofire-bassist>
 
+
     <script type="module">
         import { audioRouter } from './lib/audio_router.js';
         import { PubSub } from './lib/pubsub.js';
         import { WhipManager } from './lib/whip_manager.js';
         import { WhipDragHandler } from './lib/whip_drag_handler.js';
+        import { contourBindingManager } from './lib/contour_binding_manager.js';
         import './components/ui/whip_target_light.js';
         import './components/controllers/output_control.js';
         import './components/controllers/conductor.js';
@@ -196,10 +226,15 @@
         import './components/instrumentalists/keyboardist.js';
         import './components/instrumentalists/drummer.js';
         import './components/instrumentalists/bassist.js';
+        import './components/planners/rhythm_planner.js';
+        import './components/planners/melody_planner.js';
 
         // Initialize whip binding system
         WhipManager.initialize();
         WhipDragHandler.initialize();
+
+        // Initialize contour binding system
+        contourBindingManager.initialize();
 
         // Make available globally for components
         window.audioRouter = audioRouter;

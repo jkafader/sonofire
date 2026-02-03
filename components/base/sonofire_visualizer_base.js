@@ -1,7 +1,8 @@
 import { SonofireBase } from './sonofire_base.js';
 import { PlayheadsMixin, PLAYHEAD_SIDEBAR_WIDTH } from '../../lib/mixins/playheads.js';
 import { SCALES, SCALE_TONES } from '../../lib/midi_data.js';
-
+const LAYER_SIDEBAR_WIDTH = 250;
+const ZOOM_CONTROL_WIDTH = 60;
 /**
  * Core visualizer class (before mixin application)
  * Provides common functionality for data loading and visualization
@@ -140,8 +141,10 @@ class SonofireVisualizerBaseCore extends SonofireBase {
             this.onPoolChange(poolContext);
         }
 
-        // Restore playheads from PubSub (from mixin)
-        this.restorePlayheads();
+        // Restore playheads from PubSub (from mixin) - but skip during section restore
+        if (!this.sectionRestoreInProgress) {
+            this.restorePlayheads();
+        }
 
         // Render playhead controls UI (from mixin)
         this.renderPlayheadControls();
@@ -337,10 +340,10 @@ class SonofireVisualizerBaseCore extends SonofireBase {
         const parentElement = this.parentElement;
         if (parentElement && parentElement.style) {
             // Set explicit width on parent to match visualization + sidebar + padding
-            const newParentWidth = this.width + PLAYHEAD_SIDEBAR_WIDTH + 70;
+            const newParentWidth = this.width + PLAYHEAD_SIDEBAR_WIDTH + LAYER_SIDEBAR_WIDTH + ZOOM_CONTROL_WIDTH + 70;
             const newParentHeight = this.height + 40;
             parentElement.style.width = `${newParentWidth}px`;
-            parentElement.style.minHeight = `${newParentHeight}px`;
+            parentElement.style.height = `${newParentHeight}px`;
             parentElement.style.flex = 'none'; // Override flex sizing
         }
     }

@@ -20,8 +20,8 @@ export class SonofireSoloist extends BaseInstrumentalist {
 
         // Note range settings
         this.noteRange = 'mid';           // 'low', 'mid', 'high', 'very-high', 'wide'
-        this.minNote = 55;                // Minimum note (G3)
-        this.maxNote = 73;                // Maximum note (C#5) - 1.5 octaves
+        this.minNote = 0;                 // Minimum note (unrestricted for testing)
+        this.maxNote = 128;               // Maximum note (unrestricted for testing)
 
         // Deviation tracking for dissonance
         this.currentDeviation = null;     // null = no forecast data, 0.0-1.0 = deviation amount
@@ -43,6 +43,25 @@ export class SonofireSoloist extends BaseInstrumentalist {
         // Playhead binding tracking
         this.boundPlayheadId = null;       // ID of playhead bound to noteGeneration parameter
         this.lookaheadSubscription = null; // Track lookahead subscription for cleanup
+
+        // Clock-based playing (NEW)
+        this.lastStep = -1;                // Last step played (for clock-based playing)
+
+        // Melody planner integration (NEW - PRIMARY NOTE SOURCE)
+        this.melodyNotes = null;           // Melody notes from melody planner
+        this.melodyIndex = 0;              // Current position in melody
+
+        // Style-based interpretation (NEW)
+        this.currentStyle = null;          // Current composition style from Composer
+        this.rhythmPattern = null;         // Rhythm pattern from planner for phrasing
+        this.styleArticulation = {         // Style-specific articulation settings
+            swing: 0.0,                    // Swing feel amount (0-1)
+            staccato: 0.0,                 // Staccato vs legato (0=legato, 1=staccato)
+            accentPattern: [],             // Beat accent pattern
+            bendProbability: 0.0,          // Probability of pitch bends
+            vibratoProbability: 0.0,       // Probability of vibrato
+            chromaticApproach: 0.0         // Probability of chromatic approach notes
+        };
     }
 
     /**
@@ -58,8 +77,8 @@ export class SonofireSoloist extends BaseInstrumentalist {
                 this.maxNote = 54;  // F#3 (1.5 octaves)
                 break;
             case 'mid':
-                this.minNote = 55;  // G3
-                this.maxNote = 73;  // C#5 (1.5 octaves)
+                this.minNote = 0;   // Unrestricted (testing)
+                this.maxNote = 128; // Unrestricted (testing)
                 break;
             case 'high':
                 this.minNote = 72;  // C5
@@ -115,6 +134,11 @@ export class SonofireSoloist extends BaseInstrumentalist {
     setupSubscriptions() {
         super.setupSubscriptions();
 
+        // NEW: Subscribe to clock ticks to play notes automatically
+        this.subscribe('clock:tick', (data) => {
+            this.handleClockTick(data);
+        });
+
         // Subscribe to next chord for phrase planning
         this.subscribe('music:nextChord', (data) => {
             this.nextChord = data;
@@ -161,6 +185,196 @@ export class SonofireSoloist extends BaseInstrumentalist {
             }
             this.renderThrottled();
         }, this);
+
+        // NEW: Subscribe to composition style from Composer
+        this.subscribe('context:style', (data) => {
+            if (data.style !== this.currentStyle) {
+                this.currentStyle = data.style;
+                this.interpretStyle(data.style);
+                console.log(`Soloist: Interpreting style "${data.style}"`);
+            }
+        }, this);
+
+        // NEW: Subscribe to rhythm pattern from planner
+        this.subscribe('rhythm:pattern', (data) => {
+            this.rhythmPattern = data.pattern;
+            console.log('Soloist: Received rhythm pattern for phrasing');
+        }, this);
+
+        // NEW: Subscribe to melody from melody planner (PRIMARY NOTE SOURCE)
+        this.subscribe('melody:phrase', (data) => {
+            if (data && data.notes) {
+                const newMelody = data.notes.map(n => n.pitch);
+
+                // Only reset index if the melody actually changed
+                const melodyChanged = !this.melodyNotes ||
+                                     this.melodyNotes.length !== newMelody.length ||
+                                     this.melodyNotes.some((note, i) => note !== newMelody[i]);
+
+                this.melodyNotes = newMelody;
+
+                if (melodyChanged) {
+                    console.log('Soloist: NEW melody received from melody planner:', this.melodyNotes.length, 'notes');
+                    // Don't reset index - keep playing from current position for smooth transition
+                }
+            }
+        }, this);
+    }
+
+    /**
+     * Interpret composition style and set articulation parameters
+     * @param {string} style - Style identifier (e.g., 'jazz-swing', 'blues-12bar', etc.)
+     */
+    interpretStyle(style) {
+        // Reset to defaults
+        this.styleArticulation = {
+            swing: 0.0,
+            staccato: 0.0,
+            accentPattern: [],
+            bendProbability: 0.0,
+            vibratoProbability: 0.0,
+            chromaticApproach: 0.0
+        };
+
+        // Configure based on style
+        switch (style) {
+            case 'jazz-swing':
+                this.styleArticulation.swing = 0.67; // Strong swing feel (2:1 ratio)
+                this.styleArticulation.staccato = 0.3; // Slightly detached
+                this.styleArticulation.vibratoProbability = 0.4;
+                this.styleArticulation.chromaticApproach = 0.3; // Chromatic approach tones
+                break;
+
+            case 'jazz-bebop':
+                this.styleArticulation.swing = 0.6;
+                this.styleArticulation.staccato = 0.5; // More staccato for bebop
+                this.styleArticulation.vibratoProbability = 0.2; // Less vibrato
+                this.styleArticulation.chromaticApproach = 0.5; // More chromatic runs
+                break;
+
+            case 'jazz-modal':
+                this.styleArticulation.swing = 0.4; // Lighter swing
+                this.styleArticulation.staccato = 0.1; // Legato
+                this.styleArticulation.vibratoProbability = 0.6; // More expressive
+                this.styleArticulation.chromaticApproach = 0.1;
+                break;
+
+            case 'jazz-ballad':
+                this.styleArticulation.swing = 0.3;
+                this.styleArticulation.staccato = 0.0; // Very legato
+                this.styleArticulation.vibratoProbability = 0.8; // Lots of vibrato
+                this.styleArticulation.bendProbability = 0.3;
+                this.styleArticulation.chromaticApproach = 0.2;
+                break;
+
+            case 'blues-12bar':
+            case 'blues-minor':
+                this.styleArticulation.swing = 0.5; // Shuffle feel
+                this.styleArticulation.staccato = 0.2;
+                this.styleArticulation.bendProbability = 0.6; // Blues bends!
+                this.styleArticulation.vibratoProbability = 0.5;
+                this.styleArticulation.chromaticApproach = 0.4;
+                break;
+
+            case 'rock':
+                this.styleArticulation.swing = 0.0; // Straight 8ths
+                this.styleArticulation.staccato = 0.4;
+                this.styleArticulation.bendProbability = 0.4;
+                this.styleArticulation.vibratoProbability = 0.3;
+                this.styleArticulation.chromaticApproach = 0.1;
+                break;
+
+            case 'funk':
+                this.styleArticulation.swing = 0.2; // Light swing/16th feel
+                this.styleArticulation.staccato = 0.7; // Very staccato
+                this.styleArticulation.accentPattern = [1, 0, 0, 1, 0, 0, 1, 0]; // Syncopated
+                this.styleArticulation.bendProbability = 0.2;
+                this.styleArticulation.chromaticApproach = 0.3;
+                break;
+
+            case 'latin-bossa':
+                this.styleArticulation.swing = 0.0; // Straight
+                this.styleArticulation.staccato = 0.3;
+                this.styleArticulation.vibratoProbability = 0.3;
+                this.styleArticulation.chromaticApproach = 0.2;
+                break;
+
+            case 'latin-salsa':
+            case 'latin-samba':
+                this.styleArticulation.swing = 0.0;
+                this.styleArticulation.staccato = 0.5; // Crisp articulation
+                this.styleArticulation.accentPattern = [1, 0, 1, 0, 1, 0, 1, 0]; // Clave-influenced
+                this.styleArticulation.vibratoProbability = 0.2;
+                break;
+
+            case 'rnb-soul':
+                this.styleArticulation.swing = 0.3;
+                this.styleArticulation.staccato = 0.1; // Smooth
+                this.styleArticulation.bendProbability = 0.5;
+                this.styleArticulation.vibratoProbability = 0.7; // Expressive
+                this.styleArticulation.chromaticApproach = 0.3;
+                break;
+
+            case 'pop':
+                this.styleArticulation.swing = 0.0;
+                this.styleArticulation.staccato = 0.3;
+                this.styleArticulation.vibratoProbability = 0.3;
+                this.styleArticulation.chromaticApproach = 0.1;
+                break;
+
+            case 'country':
+                this.styleArticulation.swing = 0.4; // Country shuffle
+                this.styleArticulation.staccato = 0.4;
+                this.styleArticulation.bendProbability = 0.4; // Country bends
+                this.styleArticulation.vibratoProbability = 0.3;
+                this.styleArticulation.chromaticApproach = 0.1;
+                break;
+
+            case 'reggae':
+                this.styleArticulation.swing = 0.0;
+                this.styleArticulation.staccato = 0.6; // Choppy
+                this.styleArticulation.accentPattern = [0, 1, 0, 1, 0, 1, 0, 1]; // Offbeat emphasis
+                this.styleArticulation.vibratoProbability = 0.2;
+                break;
+
+            default:
+                // Keep defaults
+                break;
+        }
+    }
+
+    /**
+     * Apply style-based articulation to a note
+     * @param {Object} noteData - Original note data {note, velocity, duration}
+     * @returns {Object} Articulated note data
+     */
+    applyStyleArticulation(noteData) {
+        const articulated = { ...noteData };
+
+        // Apply staccato (shorten duration)
+        const staccatoFactor = 1.0 - (this.styleArticulation.staccato * 0.5); // 0.5 to 1.0
+        articulated.duration = Math.floor(articulated.duration * staccatoFactor);
+
+        // Apply accent pattern if exists
+        if (this.styleArticulation.accentPattern.length > 0) {
+            const patternIndex = this.phraseIndex % this.styleArticulation.accentPattern.length;
+            if (this.styleArticulation.accentPattern[patternIndex]) {
+                articulated.velocity = Math.min(127, articulated.velocity + 15);
+            }
+        }
+
+        // Apply pitch bend (for blues, soul styles)
+        if (Math.random() < this.styleArticulation.bendProbability) {
+            // Send pitch bend before note (bend up into the note)
+            articulated.pitchBend = Math.random() < 0.5 ? -200 : 200; // Semitone bend
+        }
+
+        // Apply chromatic approach
+        if (Math.random() < this.styleArticulation.chromaticApproach) {
+            articulated.approachNote = articulated.note + (Math.random() < 0.5 ? -1 : 1);
+        }
+
+        return articulated;
     }
 
     /**
@@ -321,20 +535,33 @@ export class SonofireSoloist extends BaseInstrumentalist {
      * @returns {Array|null} Array of note objects or null if insufficient info
      */
     generatePhrase() {
-        if (!this.currentChord || !this.nextChord || !this.lookaheadInfo) {
-            console.warn('Soloist: Insufficient info for phrase generation', {
-                hasCurrentChord: !!this.currentChord,
-                hasNextChord: !!this.nextChord,
-                hasLookahead: !!this.lookaheadInfo
-            });
+        if (!this.currentChord) {
+            console.warn('Soloist: No current chord for phrase generation');
             return null;
         }
 
-        const phraseLength = Math.max(4, this.lookaheadInfo.estimatedEventCount);
+        // Determine phrase length from rhythm pattern or lookahead
+        let phraseLength = 16; // Default to one bar (16 steps)
+
+        if (this.rhythmPattern && this.rhythmPattern.layers && this.rhythmPattern.layers.length > 0) {
+            // Use rhythm pattern length
+            const layerIndex = Math.min(
+                Math.floor(this.density * this.rhythmPattern.layers.length),
+                this.rhythmPattern.layers.length - 1
+            );
+            const selectedLayer = this.rhythmPattern.layers[layerIndex];
+            if (selectedLayer && selectedLayer.pattern) {
+                phraseLength = selectedLayer.pattern.length;
+            }
+        } else if (this.lookaheadInfo) {
+            // Fall back to lookahead if available
+            phraseLength = Math.max(4, this.lookaheadInfo.estimatedEventCount);
+        }
+
         const currentChordTones = this.currentChord.voicing || [];
-        const nextChordTones = this.nextChord.voicing || [];
+        const nextChordTones = this.nextChord ? (this.nextChord.voicing || []) : currentChordTones;
         const poolNotes = this.currentScale || [];
-        const trend = this.lookaheadInfo.trend;
+        const trend = this.lookaheadInfo ? this.lookaheadInfo.trend : 0; // 0 = no trend if no lookahead
 
         // Generate phrase structure
         const phrase = [];
@@ -554,43 +781,121 @@ export class SonofireSoloist extends BaseInstrumentalist {
     }
 
     /**
-     * Generate and play next note (triggered by whip automation)
-     * Now uses pre-generated phrase if available
+     * Handle clock tick - play notes automatically based on rhythm pattern
      */
-    generateAndPlayNote() {
+    handleClockTick(clockData) {
         if (!this.enabled) return;
 
-        // If we have a pre-generated phrase, use it
-        if (this.currentPhrase && this.phraseIndex < this.currentPhrase.length) {
-            const phraseNote = this.currentPhrase[this.phraseIndex];
+        const { tick, ppqn } = clockData;
 
-            this.sendNote(
-                phraseNote.note,
-                phraseNote.velocity,
-                phraseNote.duration
+        // Calculate 16th note position
+        const sixteenthNote = ppqn / 4;
+        const currentStep = Math.floor(tick / sixteenthNote) % 16;
+
+        // Only process each step once
+        if (currentStep === this.lastStep) return;
+        this.lastStep = currentStep;
+
+        // Generate and play note on this step, passing the step number
+        this.generateAndPlayNote(currentStep);
+    }
+
+    /**
+     * Generate and play next note (triggered by clock)
+     * PRIMARY: Uses melody from melody planner
+     * RHYTHM: Uses rhythm pattern from rhythm planner
+     * FALLBACK: Generates from chords if no melody available
+     * @param {number} currentStep - Current 16th note step (0-15)
+     */
+    generateAndPlayNote(currentStep) {
+        if (!this.enabled) return;
+
+        // DEBUG: Log on step 0
+        if (currentStep === 0) {
+            console.log('Soloist state:', {
+                currentStep,
+                melodyIndex: this.melodyIndex,
+                hasMelody: !!this.melodyNotes,
+                melodyLength: this.melodyNotes ? this.melodyNotes.length : 0,
+                melodyNotes: this.melodyNotes ? this.melodyNotes.slice(0, 5) : null,
+                density: this.density
+            });
+        }
+
+        // Check rhythm pattern to determine IF we should play on THIS STEP
+        let shouldPlay = true;
+        let velocityBoost = 0;
+
+        if (this.rhythmPattern && this.rhythmPattern.layers) {
+            const layerIndex = Math.min(
+                Math.floor(this.density * this.rhythmPattern.layers.length),
+                this.rhythmPattern.layers.length - 1
             );
+            const selectedLayer = this.rhythmPattern.layers[layerIndex];
 
-            this.lastNote = phraseNote.note;
-            this.phraseIndex++;
+            if (selectedLayer && selectedLayer.pattern && selectedLayer.pattern.length > 0) {
+                const patternStep = currentStep % selectedLayer.pattern.length;
+                // Handle both boolean and numeric patterns
+                shouldPlay = !!selectedLayer.pattern[patternStep];
+
+                if (currentStep === 0) {
+                    console.log(`Soloist rhythm: step ${currentStep}, shouldPlay=${shouldPlay}, layer=${layerIndex}`);
+                }
+            }
+
+            // Apply accent if present
+            if (this.rhythmPattern.accents && this.rhythmPattern.accents.length > 0) {
+                const accentStep = currentStep % this.rhythmPattern.accents.length;
+                if (this.rhythmPattern.accents[accentStep]) {
+                    velocityBoost = 15;
+                }
+            }
+        }
+
+        if (!shouldPlay) {
+            // Rhythm says don't play on this step - skip it
+            return;
+        }
+
+        // Determine which note to play
+        let note;
+        let velocity = 80;
+        let duration = 300;
+
+        // PRIMARY SOURCE: Melody planner
+        if (this.melodyNotes && this.melodyNotes.length > 0) {
+            // Use melody from melody planner
+            const melodyStep = this.melodyIndex % this.melodyNotes.length;
+            note = this.melodyNotes[melodyStep];
+            console.log(`Soloist: PLAY step=${currentStep}, melodyIndex=${this.melodyIndex}, melodyStep=${melodyStep}, note=${note}`);
         } else {
-            // Fallback to simple note generation if no phrase available
-            console.warn('Soloist: No phrase available, using fallback');
-            let note = this.lastNote || 60;
-
+            // FALLBACK: Generate from current chord
             if (this.currentChord?.voicing && this.currentChord.voicing.length > 0) {
                 const chordTones = this.currentChord.voicing;
                 note = chordTones[Math.floor(Math.random() * chordTones.length)];
+            } else {
+                note = this.lastNote || 60;
             }
-
             note = this.getNearestScaleNote(note);
-            note = Math.max(this.minNote, Math.min(this.maxNote, note));
-
-            const velocity = this.nextNoteVelocity || 80;
-            const duration = 300 * (2 - this.density);
-
-            this.sendNote(note, velocity, duration);
-            this.lastNote = note;
+            console.log(`Soloist: FALLBACK step=${currentStep}, note=${note}`);
         }
+
+        // Clamp to note range
+        note = Math.max(this.minNote, Math.min(this.maxNote, note));
+
+        // Apply style articulation
+        const articulated = this.applyStyleArticulation({
+            note,
+            velocity: velocity + velocityBoost,
+            duration
+        });
+
+        // Send the note
+        this.sendNote(articulated.note, articulated.velocity, articulated.duration, articulated.pitchBend);
+
+        this.lastNote = articulated.note;
+        this.melodyIndex++;
+        // No wrapping - let modulo handle it when accessing the array
     }
 
     /**
@@ -793,27 +1098,29 @@ export class SonofireSoloist extends BaseInstrumentalist {
      */
     render() {
         this.innerHTML = `
-            <div style="background: #2d2d2d; padding: 10px; margin: 5px 0; border-left: 3px solid #ce9178;">
-                <strong style="color: #ce9178;">🎺 Soloist</strong>
-                <span style="margin-left: 10px; color: #888;">
-                    Channel:
-                    <select id="channel-select" style="margin: 0 5px;">
-                        ${this.renderChannelOptions()}
-                    </select>
-                    | Note Gen ${this.getTargetLightHTML('noteGeneration', 'inline')}
-                    | Velocity ${this.getTargetLightHTML('velocity', 'inline')}
-                    | Style: ${this.playingStyle}
-                    | Range ${this.getTargetLightHTML('noteRange')}:
-                    <select id="range-select" style="margin: 0 5px;">
-                        ${this.renderRangeOptions()}
-                    </select>
-                    | Max Interval ${this.getTargetLightHTML('maxInterval')}:
-                    <input type="range" id="max-interval-slider" min="0" max="12" value="${this.maxInterval}" style="width: 100px; vertical-align: middle;">
-                    <span style="margin-left: 5px;">${this.maxInterval}</span>
-                    | Mute ${this.getTargetLightHTML('mute')}: <button id="mute-btn" style="padding: 2px 8px; margin: 0 5px;">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
-                    | <button id="debug-btn" style="padding: 2px 8px; margin: 0 5px;">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
-                    | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
-                </span>
+            <div class="sf-component sf-component-soloist">
+                <div class="sf-controls">
+                    <strong class="sf-component-header-soloist">🎺 Soloist</strong>
+                    <span class="sf-text-secondary">
+                        Channel:
+                        <select id="channel-select" class="sf-select" style="margin: 0 5px;">
+                            ${this.renderChannelOptions()}
+                        </select>
+                        | Note Gen ${this.getTargetLightHTML('noteGeneration', 'inline')}
+                        | Velocity ${this.getTargetLightHTML('velocity', 'inline')}
+                        | Style: ${this.playingStyle}
+                        | Range ${this.getTargetLightHTML('noteRange')}:
+                        <select id="range-select" class="sf-select" style="margin: 0 5px;">
+                            ${this.renderRangeOptions()}
+                        </select>
+                        | Max Interval ${this.getTargetLightHTML('maxInterval')}:
+                        <input type="range" id="max-interval-slider" min="0" max="12" value="${this.maxInterval}" style="width: 100px; vertical-align: middle;">
+                        <span style="margin-left: 5px;">${this.maxInterval}</span>
+                        | Mute ${this.getTargetLightHTML('mute')}: <button id="mute-btn" class="sf-button sf-button-soloist">${this.muted ? '🔇 Unmute' : '🔊 Mute'}</button>
+                        | <button id="debug-btn" class="sf-button sf-button-secondary">${this.debug ? '🐛 Debug OFF' : '🐛 Debug'}</button>
+                        | ${this.enabled ? '✓ Enabled' : '✗ Disabled'}
+                    </span>
+                </div>
             </div>
         `;
 

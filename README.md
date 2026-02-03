@@ -47,6 +47,28 @@ A modular, event-driven web component system for converting data visualizations 
 - **Bassist** (`sonofire-bassist`) - Bass line generation (walking bass, root notes, pedal)
 - **Drummer** (`sonofire-drummer`) - Algorithmic drum patterns
 
+### Data Flow
+
+```
+  Melody Planner → Melody
+                     ↓
+                 [COMPOSER]
+      Analyze → Infer Harmony → Generate Chords
+                     ↓
+            Chord Progression + Style
+                     ↓
+       ┌─────────────┼─────────────┐
+       ↓             ↓              ↓
+   [SOLOIST]   [KEYBOARDIST]    [BASSIST]
+       ↓             ↓              ↓
+    Interpret    Comp under    Support with
+     melody       melody        rhythm
+                     ↓
+                 [DRUMMER]
+                     ↓
+            Provide foundation
+```
+
 ### Core Libraries
 
 - **`lib/pubsub.js`** - Event pub/sub system with `PubSub.last()` for state discovery
